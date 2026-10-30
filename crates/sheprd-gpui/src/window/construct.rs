@@ -208,6 +208,7 @@ impl SheprdWindow {
             core_terminals,
             daemon_text: Default::default(),
             deliveries: Default::default(),
+            desktop_region: Default::default(),
             details_visible: false,
             device_drag: None,
             device_filter: Default::default(),

@@ -209,6 +209,8 @@ pub(crate) struct SheprdWindow {
     pub(crate) daemon_text: crate::release_notes::DaemonText,
     /// Notes waiting for their agents to be ready for them.
     pub(crate) deliveries: crate::agent_notes::Deliveries,
+    /// The plugin region docked on the right edge.
+    pub(crate) desktop_region: crate::desktop_region::Panel,
     /// Whether the details pane a hosting layout draws beside the main view
     /// is open; its toggle ends the title bar while hosted.
     pub(crate) details_visible: bool,

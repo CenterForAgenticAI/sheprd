@@ -63,6 +63,7 @@ impl SheprdWindow {
                         column.children(self.zen_status_bar(cx))
                     }),
             )
+            .children(self.render_desktop_region(window, cx))
             .into_any_element()
     }
 }

@@ -157,6 +157,8 @@ pub fn request(command: Command, snapshot: &ClientShellSnapshot) -> Option<(Meth
         | Command::ToggleAllHosts
         | Command::FocusNextRegion
         | Command::FocusPreviousRegion
+        | Command::ToggleDesktopRegion
+        | Command::FocusDesktopRegion
         | Command::ToggleZenMode
         | Command::DevicesOverview
         | Command::NotificationHistory
