@@ -40,6 +40,7 @@ pub(crate) enum Preference {
     AgentCheckpoints(bool),
     ShowListeningPorts(bool),
     ShowAgentsHeader(bool),
+    ShowChangesPanel(bool),
     /// The terminal backend used when creating a tab.
     TerminalBackend(TerminalBackend),
     /// `herdr_2_scrollback`: lines each Herdr 2 terminal keeps.
@@ -208,6 +209,9 @@ impl Config {
                 }
                 Preference::ShowAgentsHeader(value) => {
                     (None, "show_agents_header", Some(value.into()))
+                }
+                Preference::ShowChangesPanel(value) => {
+                    (None, "show_changes_panel", Some(value.into()))
                 }
                 Preference::TerminalBackend(value) => {
                     (None, "terminal_backend", Some(value.name().into()))
