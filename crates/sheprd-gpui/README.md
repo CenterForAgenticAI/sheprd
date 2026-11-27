@@ -1252,6 +1252,7 @@ header shown while that view is active.
 Turn on **Show Changed panel** in **Settings > Sidebar** to keep the
 **Changed** file list beside the terminals. It follows the focused local Git
 checkout and shows its uncommitted files with added and removed line counts.
+It refreshes when Git status changes and at least every five seconds.
 The panel can also hold sections from Sheprd mods, and **Toggle Mod Panel**
 hides or shows the whole panel. The same setting is available as top-level
 `show_changes_panel`.
