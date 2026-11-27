@@ -201,3 +201,63 @@ fn branch_only_workspace_can_create_until_git_identity_disappears() {
         Err(crate::Error::WorkspaceRepositoryChanged)
     ));
 }
+
+/// A main checkout whose focused pane runs outside the repository (a chat
+/// started in the home folder) while the workspace still stands in, and is
+/// named for, its repository lists and creates through the repository's root
+/// rather than sending the daemon that folder, which is not a Git work tree.
+#[test]
+fn a_main_checkout_with_a_wandered_pane_creates_from_its_repository() {
+    use crate::menu::workspace::Source;
+    let home = if cfg!(windows) {
+        "C:/Users/me"
+    } else {
+        "/Users/me"
+    };
+    let mut snapshot = sidebar::layout_tests::snapshot(7);
+    snapshot.workspaces[3].new_workspace_cwd = home.into();
+    let root = sidebar::layout_tests::REPO_KEY.trim_end_matches("/.git");
+    let target = WorkspaceTarget::for_new_worktree(&snapshot, &snapshot.workspaces[3]).unwrap();
+    assert_eq!(
+        target.source,
+        Source::Repository {
+            root: root.into(),
+            key: sidebar::layout_tests::REPO_KEY.into(),
+        }
+    );
+    assert_eq!(
+        target.list_params(),
+        serde_json::json!({"cwd": root, "trust_repository": false})
+    );
+    assert_eq!(
+        target
+            .request(&snapshot, WorkspaceAction::NewWorktree, "feature/next")
+            .unwrap(),
+        (
+            Method::WorktreeCreate,
+            serde_json::json!({"cwd": root, "base": "HEAD", "focus": true,
+                "trust_repository": false, "branch": "feature/next"})
+        )
+    );
+    assert_eq!(
+        target
+            .request(&snapshot, WorkspaceAction::OpenWorktree, "/elsewhere")
+            .unwrap()
+            .1,
+        serde_json::json!({"cwd": root, "path": "/elsewhere", "focus": true,
+            "trust_repository": false})
+    );
+    // Once the pane returns, the dialog it opened names a source the
+    // workspace no longer has, so it refuses rather than guess.
+    let mut back = snapshot.clone();
+    back.workspaces[3].new_workspace_cwd = root.into();
+    assert!(matches!(
+        target.request(&back, WorkspaceAction::NewWorktree, ""),
+        Err(crate::Error::WorkspaceRepositoryChanged)
+    ));
+    // A label renamed by hand says nothing of where the workspace stands,
+    // so its directory is still named.
+    snapshot.workspaces[3].custom_label = true;
+    let target = WorkspaceTarget::for_new_worktree(&snapshot, &snapshot.workspaces[3]).unwrap();
+    assert_eq!(target.source, Source::Directory(home.into()));
+}

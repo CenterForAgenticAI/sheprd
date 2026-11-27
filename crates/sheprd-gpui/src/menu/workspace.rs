@@ -79,18 +79,40 @@ pub(super) enum Source {
     /// only open main checkout's shell has wandered off: the daemon refuses
     /// a linked checkout as a source. Its Git directory, with the linked
     /// checkout's branch, is what lookups read, since the main checkout's
-    /// reported branch is of the repository its shell moved to.
+    /// reported branch is of the repository its shell moved to. Also for a
+    /// main checkout whose focused pane wandered off while the workspace
+    /// itself still stands in, and is named for, its repository.
     Repository { root: String, key: String },
 }
 
 impl Source {
     fn of(workspace: &ClientShellWorkspace) -> Self {
-        if left_checkout(workspace) {
-            Self::Directory(workspace.new_workspace_cwd.clone())
-        } else {
-            Self::Workspace
+        if !left_checkout(workspace) {
+            return Self::Workspace;
+        }
+        match stays_in_repository(workspace) {
+            Some((root, key)) => Self::Repository {
+                root: root.to_owned(),
+                key: key.to_owned(),
+            },
+            None => Self::Directory(workspace.new_workspace_cwd.clone()),
         }
     }
+}
+
+/// The root and Git directory of the repository a main checkout whose
+/// directory left it still stands in. The directory follows the focused pane
+/// of the active tab, but the label and branch follow the first tab's root
+/// pane: when the label is still the one Herdr draws from the kept
+/// repository's root, only a pane wandered off (a chat started in the home
+/// folder, say), and the repository is the one to branch. A label naming
+/// anything else means the workspace itself moved, so its directory is named.
+fn stays_in_repository(workspace: &ClientShellWorkspace) -> Option<(&str, &str)> {
+    let tree = workspace.worktree.as_ref()?;
+    let root = crate::worktree::checkout_root(&tree.key)?;
+    let name = root.rsplit(['/', '\\']).next()?;
+    (!workspace.custom_label && !name.is_empty() && workspace.label == name)
+        .then_some((root, tree.key.as_str()))
 }
 
 impl WorkspaceTarget {

@@ -204,7 +204,9 @@ impl SheprdWindow {
     /// Herdr keeps for it is looked up by its current directory, which
     /// `workspace_input` already prefers over that metadata. A linked
     /// checkout routed through such a main checkout is looked up by its
-    /// repository's Git directory and its own branch, which belong together.
+    /// repository's Git directory and its own branch, which belong together;
+    /// so is a main checkout only one of whose panes wandered off, by its
+    /// reported branch, which is still its repository's.
     pub(super) fn menu_target_input(&self, origin: &Origin) -> crate::Result<Input> {
         let target = self
             .menu
@@ -222,7 +224,10 @@ impl SheprdWindow {
         let workspace = self
             .menu_target_workspace()
             .ok_or(crate::Error::StaleWorkspace)?;
-        match (&target.source, &target.base) {
+        match (
+            &target.source,
+            target.base.as_ref().or(target.branch.as_ref()),
+        ) {
             (super::workspace::Source::Repository { key, .. }, Some(branch)) => {
                 crate::worktree::validate_branch(branch)?;
                 Ok(Input {

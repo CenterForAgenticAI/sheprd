@@ -13,6 +13,8 @@ fn open(view: &mut SheprdWindow, workspace: usize, linked_route: bool) {
     let snapshot = std::sync::Arc::make_mut(view.live.snapshot.as_mut().unwrap());
     snapshot.workspaces = sidebar::layout_tests::snapshot(7).workspaces;
     snapshot.workspaces[3].new_workspace_cwd = MOVED.into();
+    // Its label follows the shell into the other repository.
+    snapshot.workspaces[3].label = "wgsextract-cli".into();
     snapshot.workspaces[3].branch = Some("main".into());
     let target = if linked_route {
         WorkspaceTarget::for_new_worktree(snapshot, &snapshot.workspaces[workspace]).unwrap()
