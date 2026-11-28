@@ -160,13 +160,23 @@ pub(crate) enum Scrubbed {
     /// Block every unsolicited handover except `FleetId`, which a person
     /// explicitly signed a join bundle for.
     Except(FleetId),
+    /// Block every unsolicited handover except sharing as a host for
+    /// `FleetId`, once an explicit Share handover began for it.
+    ExceptHost(FleetId),
 }
 
 impl Scrubbed {
-    pub(crate) fn blocks(self, fleet: FleetId) -> bool {
+    pub(crate) fn blocks_member(self, fleet: FleetId) -> bool {
+        match self {
+            Self::All | Self::ExceptHost(_) => true,
+            Self::Except(allowed) => allowed != fleet,
+        }
+    }
+
+    pub(crate) fn blocks_host(self, fleet: FleetId) -> bool {
         match self {
             Self::All => true,
-            Self::Except(allowed) => allowed != fleet,
+            Self::Except(allowed) | Self::ExceptHost(allowed) => allowed != fleet,
         }
     }
 }
@@ -442,7 +452,7 @@ impl Fleet {
     // fleet tests do, so a Windows test build sees it unused too.
     #[cfg_attr(not(all(test, unix)), allow(dead_code))]
     pub(crate) fn receive(&self, ops: Vec<Op>, now_ms: u64) -> Result<usize> {
-        self.receive_from(ops, &[], false, now_ms)
+        self.receive_from(ops, &[], None, now_ms)
     }
 
     /// [`Fleet::receive`] into the fleet `fleet` only: what a removal
@@ -456,7 +466,7 @@ impl Fleet {
         if self.inner().log.as_ref().map(Log::fleet) != Some(fleet) {
             return Err(Error::NoFleet);
         }
-        self.receive_from(ops, &[], false, now_ms)
+        self.receive_from(ops, &[], None, now_ms)
     }
 
     /// [`Fleet::receive`], from a caller whose heads are `caller`: with no
@@ -469,7 +479,7 @@ impl Fleet {
         &self,
         ops: Vec<Op>,
         caller: &[OpId],
-        rejoin: bool,
+        rejoin: Option<FleetId>,
         now_ms: u64,
     ) -> Result<usize> {
         let mut inner = self.inner();
@@ -567,7 +577,8 @@ impl Fleet {
                 .collect(),
             _ => ops,
         };
-        let refused = match self.receive_from(ops, &heads, apply.rejoin, now_ms) {
+        let rejoin = apply.rejoin.then_some(named).flatten();
+        let refused = match self.receive_from(ops, &heads, rejoin, now_ms) {
             Ok(refused) => refused,
             Err(Error::NotAdmitted)
                 if named.is_some_and(|named| self.inner().joining.contains_key(&named)) =>

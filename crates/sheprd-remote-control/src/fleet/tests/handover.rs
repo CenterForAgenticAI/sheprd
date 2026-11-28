@@ -409,6 +409,70 @@ async fn background_intro_read_does_not_clear_a_shared_hosts_scrub_guard() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_interrupted_explicit_share_after_scrub_resumes_on_background_sync() {
+    let (http, _, _) = relay().await;
+    let (a, b, host) = (
+        Node::new(http, 1).await,
+        Node::new(http, 2).await,
+        Node::new(http, 5).await,
+    );
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    join(&a, &b);
+    let fleet = a.view().fleet;
+    let Answer::Intro { intro } = host.ask(Ask::Intro) else {
+        panic!("no intro");
+    };
+    assert_eq!(
+        a.ask(Ask::AddHost {
+            intro,
+            deny: Vec::new(),
+        }),
+        Answer::Done
+    );
+    let ops = in_order(&a);
+    let heads = a.view().heads;
+    let full = Apply {
+        fleet: Some(fleet.clone()),
+        heads: heads.clone(),
+        ops: sync::encode_ops(&ops),
+        ..Apply::default()
+    };
+    assert!(host.fleet.apply(&full, now_ms()).is_ok());
+    assert_eq!(host.ask(Ask::Scrub { session: None }), Answer::Done);
+    // Explicit Share starts with only part 1 (`rejoin: true`), then drops.
+    let (first, rest) = ops.split_at(1);
+    let part1 = Apply {
+        fleet: Some(fleet.clone()),
+        heads: heads.clone(),
+        ops: sync::encode_ops(first),
+        rejoin: true,
+        ..Apply::default()
+    };
+    let applied = host.fleet.apply(&part1, now_ms()).unwrap();
+    assert_eq!(applied.fleet, fleet);
+    assert!(host.fleet.inner().log.is_none());
+    // Approval persists across a daemon restart and lets background sync
+    // (`rejoin: false`) finish the handover.
+    let reloaded = Fleet::load(host.dir.path(), now_ms()).unwrap();
+    let part2 = Apply {
+        fleet: Some(fleet.clone()),
+        heads,
+        ops: sync::encode_ops(rest),
+        ..Apply::default()
+    };
+    let finished = reloaded.apply(&part2, now_ms()).unwrap();
+    assert_eq!(finished.fleet, fleet);
+    assert!(reloaded.host().is_some());
+    // Host-share approval never lets a scrubbed member bypass the scrub guard.
+    assert_eq!(b.ask(Ask::Scrub { session: None }), Answer::Done);
+    let _ = b.fleet.apply(&part1, now_ms()).unwrap();
+    assert!(b.fleet.inner().log.is_none());
+    let b_reloaded = Fleet::load(b.dir.path(), now_ms()).unwrap();
+    let _ = b_reloaded.apply(&part2, now_ms()).unwrap();
+    assert!(b_reloaded.inner().log.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_shared_host_waits_for_the_denials_signed_with_its_share() {
     let (http, _, _) = relay().await;
     let (a, b, host) = (

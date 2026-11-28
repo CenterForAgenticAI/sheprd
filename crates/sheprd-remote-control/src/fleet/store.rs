@@ -34,6 +34,7 @@ const HOSTED: &str = "hosted";
 const SCRUBBED: &str = "scrubbed";
 const SCRUBBED_ALL: &str = "all";
 const SCRUBBED_EXCEPT: &str = "except:";
+const SCRUBBED_EXCEPT_HOST: &str = "except-host:";
 const MAX_SCRUBBED: u64 = 128;
 /// At worst, suspensions take about 23.5 MB of it (a save's first write
 /// keeping what the file held beside what is held, each folded target
@@ -345,10 +346,15 @@ pub(super) fn load_scrubbed(state_dir: &Path) -> Result<Option<super::Scrubbed>>
     let text = std::str::from_utf8(&bytes).ok().map(str::trim);
     let scrubbed = match text {
         Some(SCRUBBED_ALL) => super::Scrubbed::All,
-        Some(rest) => rest
-            .strip_prefix(SCRUBBED_EXCEPT)
-            .and_then(FleetId::from_hex)
-            .map_or(super::Scrubbed::All, super::Scrubbed::Except),
+        Some(rest) => {
+            if let Some(hex) = rest.strip_prefix(SCRUBBED_EXCEPT) {
+                FleetId::from_hex(hex).map_or(super::Scrubbed::All, super::Scrubbed::Except)
+            } else if let Some(hex) = rest.strip_prefix(SCRUBBED_EXCEPT_HOST) {
+                FleetId::from_hex(hex).map_or(super::Scrubbed::All, super::Scrubbed::ExceptHost)
+            } else {
+                super::Scrubbed::All
+            }
+        }
         None => super::Scrubbed::All,
     };
     Ok(Some(scrubbed))
@@ -359,6 +365,7 @@ pub(super) fn save_scrubbed(state_dir: &Path, scrubbed: super::Scrubbed) -> Resu
     let text = match scrubbed {
         super::Scrubbed::All => SCRUBBED_ALL.to_owned(),
         super::Scrubbed::Except(fleet) => format!("{SCRUBBED_EXCEPT}{fleet}"),
+        super::Scrubbed::ExceptHost(fleet) => format!("{SCRUBBED_EXCEPT_HOST}{fleet}"),
     };
     write_private(&path(state_dir, SCRUBBED), text.as_bytes())?;
     Ok(())
