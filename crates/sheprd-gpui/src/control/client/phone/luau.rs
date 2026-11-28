@@ -3,18 +3,23 @@
 use super::{Asked, NO_PHONE, drive, output};
 use crate::control::{
     ErrorCode,
-    client::{Context, Output, unexpected},
+    client::{Context, Output, finish, unexpected},
     protocol::{Request, Response, phone::Answer},
 };
 use sheprd_remote_control::control::phone::{self, Command, LuauReport, Outcome, Phone};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 /// How often `--watch` looks at the folder again.
 const POLL: Duration = Duration::from_millis(300);
+/// How often `--watch` pushes again a version the phone did not take.
+const RETRY: Duration = Duration::from_secs(3);
+
+/// What changes when a file is saved, added or removed.
+type Stamp = Vec<(String, Option<SystemTime>, usize)>;
 
 pub(super) fn luau(
     device: Option<String>,
@@ -29,37 +34,103 @@ pub(super) fn luau(
         None => screen_of(dir)?,
     };
     if reset {
-        return push(device, &screen, BTreeMap::new(), context);
+        return push(device, &screen, BTreeMap::new(), context).map(|(output, _)| output);
     }
     if !watch {
-        return push(device, &screen, read(dir)?, context);
+        return push(device, &screen, read(dir)?, context).map(|(output, _)| output);
     }
-    // Until stopped: push each time a file changes, and say what the phone
-    // found, so an agent watching sees each save land.
-    let mut last = None;
+    watch_dir(device, dir, &screen, context)
+}
+
+/// Until stopped: pushes each time a file changes and says what the phone
+/// found, as `--json` asks, so an agent watching sees each save land. A
+/// version the phone did not take, as when it is locked or away, is pushed
+/// again every [`RETRY`] until it does; one it took with Luau errors waits
+/// for the next save. A file caught mid-save is read again next time.
+fn watch_dir(
+    device: Option<String>,
+    dir: &Path,
+    screen: &str,
+    context: &Context,
+) -> crate::Result<Output> {
+    let mut watch = Watch::default();
     loop {
-        let files = read(dir)?;
-        let stamp = stamp(dir, &files);
-        if last.as_ref() != Some(&stamp) {
-            last = Some(stamp);
-            match push(device.clone(), &screen, files, context) {
-                Ok(output) => println!("{}", output.text()),
-                Err(error) => eprintln!("{error}"),
+        match read(dir) {
+            Ok(files) => {
+                let stamp = stamp(dir, &files);
+                if watch.due(&stamp, Instant::now()) {
+                    let pushed = push(device.clone(), screen, files, context);
+                    let taken = matches!(pushed, Ok((_, true)));
+                    watch.pushed(stamp, taken, Instant::now());
+                    let pushed = pushed.map(|(output, _)| output);
+                    if taken {
+                        watch.said = None;
+                        finish(pushed, context.json);
+                    } else {
+                        watch.once(pushed, context.json);
+                    }
+                }
             }
+            Err(error) => watch.once(Err(error), context.json),
         }
         std::thread::sleep(POLL);
     }
 }
 
+/// What `--watch` pushed last, so it pushes each version until the phone
+/// takes it, and says each failure once.
+#[derive(Default)]
+struct Watch {
+    /// The version the phone took.
+    taken: Option<Stamp>,
+    /// The version last pushed and not taken, and when.
+    tried: Option<(Stamp, Instant)>,
+    /// What was last said of a push the phone did not take or a read that
+    /// failed, so a retry that fails the same way says nothing.
+    said: Option<String>,
+}
+
+impl Watch {
+    /// Whether `stamp` is to be pushed now.
+    fn due(&self, stamp: &Stamp, now: Instant) -> bool {
+        if self.taken.as_ref() == Some(stamp) {
+            return false;
+        }
+        !matches!(&self.tried, Some((tried, at)) if tried == stamp && now.duration_since(*at) < RETRY)
+    }
+
+    fn pushed(&mut self, stamp: Stamp, taken: bool, now: Instant) {
+        if taken {
+            self.taken = Some(stamp);
+            self.tried = None;
+        } else {
+            self.tried = Some((stamp, now));
+        }
+    }
+
+    /// Prints `result` unless it says what was last said.
+    fn once(&mut self, result: crate::Result<Output>, json: bool) {
+        let said = match &result {
+            Ok(output) => output.text().to_owned(),
+            Err(error) => error.to_string(),
+        };
+        if self.said.as_ref() != Some(&said) {
+            finish(result, json);
+            self.said = Some(said);
+        }
+    }
+}
+
+/// Pushes `files`; whether the phone took them, Luau errors and all.
 fn push(
     device: Option<String>,
     screen: &str,
     files: BTreeMap<String, String>,
     context: &Context,
-) -> crate::Result<Output> {
+) -> crate::Result<(Output, bool)> {
     if !phone::valid_files(&files) {
         return Err(rejected(format!(
-            "At most {} .luau files and {} KiB, named as a screen's folder names them",
+            "At most {} .luau files and {} KiB as JSON, named as a screen's folder names them",
             phone::MAX_LUAU_FILES,
             phone::MAX_LUAU_BYTES / 1024
         )));
@@ -79,13 +150,14 @@ fn push(
             } => {
                 let text = reported(phone, screen, report);
                 let output = Output::data(text, &answer)?;
-                Ok(if report.problems.is_empty() {
+                let output = if report.problems.is_empty() {
                     output
                 } else {
                     output.failed()
-                })
+                };
+                Ok((output, true))
             }
-            _ => output(&answer, Asked::Show),
+            _ => Ok((output(&answer, Asked::Show)?, false)),
         },
         response => Err(unexpected(response)),
     }
@@ -201,8 +273,7 @@ fn walk(
     Ok(())
 }
 
-/// What changes when a file is saved, added or removed.
-fn stamp(dir: &Path, files: &BTreeMap<String, String>) -> Vec<(String, Option<SystemTime>, usize)> {
+fn stamp(dir: &Path, files: &BTreeMap<String, String>) -> Stamp {
     files
         .iter()
         .map(|(name, text)| {
@@ -262,5 +333,24 @@ mod tests {
         let text = reported(&phone, "pull-requests", &report);
         assert!(text.starts_with("pull-requests did not load on iPhone"));
         assert!(text.contains("problem: main.luau:3: oops"));
+    }
+
+    #[test]
+    fn a_watch_pushes_again_what_the_phone_did_not_take() {
+        let now = Instant::now();
+        let saved = vec![("main.luau".to_owned(), None, 1)];
+        let mut watch = Watch::default();
+        assert!(watch.due(&saved, now));
+
+        // The phone was locked: not again at once, but after a while.
+        watch.pushed(saved.clone(), false, now);
+        assert!(!watch.due(&saved, now + POLL));
+        assert!(watch.due(&saved, now + RETRY));
+
+        // A new save goes at once; once taken, it is not pushed again.
+        let edited = vec![("main.luau".to_owned(), None, 2)];
+        assert!(watch.due(&edited, now + POLL));
+        watch.pushed(edited.clone(), true, now + POLL);
+        assert!(!watch.due(&edited, now + RETRY * 2));
     }
 }

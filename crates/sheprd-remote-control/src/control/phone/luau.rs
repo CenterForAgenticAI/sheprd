@@ -6,7 +6,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// The most bytes of Luau one push carries, all files together.
+/// The most bytes of Luau one push carries, all files together as the
+/// JSON that carries them, escapes and all: a push stays well within the
+/// 256 KiB a command's request may take on Sheprd's control socket.
 pub const MAX_LUAU_BYTES: usize = 192 * 1024;
 /// The most files one push carries.
 pub const MAX_LUAU_FILES: usize = 64;
@@ -47,12 +49,25 @@ pub fn valid_path(path: &str) -> bool {
 /// [`valid_path`].
 pub fn valid_files(files: &BTreeMap<String, String>) -> bool {
     files.len() <= MAX_LUAU_FILES
-        && files
-            .iter()
-            .map(|(path, text)| path.len() + text.len())
-            .sum::<usize>()
-            <= MAX_LUAU_BYTES
         && files.keys().all(|path| valid_path(path))
+        && encoded_len(files).is_some_and(|len| len <= MAX_LUAU_BYTES)
+}
+
+/// How many bytes `files` take as JSON, counted without writing them out.
+fn encoded_len(files: &BTreeMap<String, String>) -> Option<usize> {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    serde_json::to_writer(&mut count, files).ok()?;
+    Some(count.0)
 }
 
 /// What the phone found loading a push, each list at most
@@ -73,4 +88,31 @@ pub struct LuauReport {
     /// The last lines the screen's mods logged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub logs: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_push_is_measured_as_the_json_that_carries_it() {
+        // Escapes double a backslash's size: raw, this fits; as JSON, not.
+        let text = "\\".repeat(MAX_LUAU_BYTES * 3 / 4);
+        assert!(text.len() < MAX_LUAU_BYTES);
+        let files = BTreeMap::from([("main.luau".to_owned(), text)]);
+        assert!(!valid_files(&files));
+
+        let files = BTreeMap::from([("main.luau".to_owned(), "x".repeat(MAX_LUAU_BYTES / 2))]);
+        assert!(valid_files(&files));
+    }
+
+    #[test]
+    fn the_largest_push_fits_a_control_request() {
+        let files = BTreeMap::from([("main.luau".to_owned(), "x".repeat(MAX_LUAU_BYTES - 64))]);
+        assert!(valid_files(&files));
+        // What the request adds around the files: the command, the screen
+        // and the device asked for.
+        let envelope = 4 * 1024;
+        assert!(encoded_len(&files).unwrap_or(usize::MAX) + envelope <= 256 * 1024);
+    }
 }

@@ -58,5 +58,15 @@ final class LuauLiveTests: XCTestCase {
         let parent = LuauLive.overlay(screen).deletingLastPathComponent()
         XCTAssertFalse(FileManager.default.fileExists(atPath: parent.appending(path: "escape.luau").path))
     }
+
+    /// A snapshot goes to a computer only when nothing else's shows.
+    func testASnapshotShowsNothingOfAnotherComputer() {
+        let mine = "a", both = ["a", "b"]
+        XCTAssertTrue(AgentControl.showsOnly(.chat(pane: "p"), device: mine, paired: both))
+        XCTAssertTrue(AgentControl.showsOnly(.workspace("w"), device: mine, paired: both))
+        XCTAssertFalse(AgentControl.showsOnly(.pullRequests, device: mine, paired: both), "a tab lists both")
+        XCTAssertTrue(AgentControl.showsOnly(.pullRequests, device: mine, paired: [mine]))
+        XCTAssertFalse(AgentControl.showsOnly(nil, device: mine, paired: [mine]), "another's chat, or the lock")
+    }
 }
 #endif

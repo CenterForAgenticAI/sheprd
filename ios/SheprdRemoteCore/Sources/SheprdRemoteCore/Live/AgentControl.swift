@@ -171,21 +171,24 @@ public struct AgentLuauReport: Codable, Hashable, Sendable {
     public var logs: [String]
 
     /// The most lines of each kind, the longest line, and the most bytes
-    /// of them all: the computer closes a socket on a message over 4 KiB.
+    /// of them all as JSON, escapes included: the computer closes a socket
+    /// on a message over 4 KiB.
     public static let maxLines = 12
     public static let maxLength = 160
     public static let maxBytes = 3000
 
     /// Problems first, then warnings, then the latest logs, until
-    /// `maxBytes`.
+    /// `maxBytes` of them encoded.
     public init(shown: Bool, problems: [String], warnings: [String] = [], logs: [String] = []) {
         var left = Self.maxBytes
         let cut = { (lines: [String]) -> [String] in
             var kept: [String] = []
             for line in lines.prefix(Self.maxLines) {
                 let short = String(line.prefix(Self.maxLength))
-                guard short.utf8.count + 8 <= left else { break }
-                left -= short.utf8.count + 8
+                // Its quotes and escapes, and the comma after it.
+                let size = Self.encodedSize(short) + 1
+                guard size <= left else { break }
+                left -= size
                 kept.append(short)
             }
             return kept
@@ -194,6 +197,18 @@ public struct AgentLuauReport: Codable, Hashable, Sendable {
         self.problems = cut(problems)
         self.warnings = cut(warnings)
         self.logs = cut(Array(logs.suffix(Self.maxLines)))
+    }
+
+    /// How many bytes `line` takes as a JSON string, as `JSONEncoder`
+    /// writes it: a control character takes six, `"`, `\` and `/` two.
+    static func encodedSize(_ line: String) -> Int {
+        line.utf8.reduce(2) { size, byte in
+            switch byte {
+            case 0x22, 0x5C, 0x2F, 0x08, 0x0C, 0x0A, 0x0D, 0x09: size + 2
+            case 0..<0x20: size + 6
+            default: size + 1
+            }
+        }
     }
 }
 

@@ -141,4 +141,20 @@ struct AgentControlTests {
         #expect(data.count < 4 * 1024)
         #expect(report.problems.count > 5, "problems go first")
     }
+
+    @Test func aReportOfEscapedLinesFitsTheLiveSocket() throws {
+        // Each of these grows six times as JSON.
+        let control = String(repeating: "\u{01}", count: 160)
+        let quoted = String(repeating: "\"\\/", count: 60)
+        let report = AgentLuauReport(
+            shown: true, problems: Array(repeating: control, count: 12), warnings: Array(repeating: quoted, count: 12),
+            logs: Array(repeating: control, count: 12)
+        )
+        let data = try JSONEncoder().encode(LiveRequest.driven(id: UInt64.max, outcome: .luau(report)))
+        #expect(data.count < 4 * 1024)
+        #expect(!report.problems.isEmpty)
+        for line in [control, quoted, "plain"] {
+            #expect(AgentLuauReport.encodedSize(line) == (try JSONEncoder().encode(line)).count)
+        }
+    }
 }

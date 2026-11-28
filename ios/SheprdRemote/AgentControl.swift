@@ -135,6 +135,9 @@ final class AgentControl {
             #endif
         case .snapshot:
             #if DEBUG
+            // A picture shows more than `state` says: only what is all
+            // this computer's goes to it.
+            guard showsOnlyItsOwn(computer, model: model) else { return answer(.refused(.other)) }
             snapshot(computer, model: model, answer: answer)
             #else
             answer(.refused(.other))
@@ -288,6 +291,24 @@ final class AgentControl {
         // Nothing shows behind the lock, so nothing is said of it.
         guard !locked else { return AgentPhoneState(screen: nil, locked: true) }
         return AgentPhoneState(screen: Self.screen(front, creating: model.creating, voice: model.voice != nil, device: computer.device))
+    }
+
+    /// Whether all the window shows is `computer`'s: one of its chats,
+    /// terminals, or workspaces, or a tab while it is the only computer
+    /// paired, as a tab lists every computer's.
+    func showsOnlyItsOwn(_ computer: Computer, model: AppModel) -> Bool {
+        Self.showsOnly(
+            state(for: computer, model: model).screen, device: computer.device, paired: model.computers.map(\.device)
+        )
+    }
+
+    static func showsOnly(_ screen: AgentScreen?, device: String, paired: [String]) -> Bool {
+        switch screen {
+        case nil: false
+        case .chat, .term, .workspace, .changes: true
+        case .home, .workspaces, .pullRequests, .settings, .settingsPage, .newWorkspace:
+            paired.allSatisfy { $0 == device }
+        }
     }
 
     static func screen(_ front: Front, creating: Creating?, voice: Bool, device: String) -> AgentScreen? {
