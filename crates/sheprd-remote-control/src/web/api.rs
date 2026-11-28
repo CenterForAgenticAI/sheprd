@@ -439,6 +439,9 @@ pub(super) async fn create_workspace(
     state
         .hub
         .create_workspace(crate::hub::NewWorkspace {
+            base: None,
+            checkout: None,
+            shell: false,
             agent,
             branch: branch.as_deref(),
             cwd: &request.cwd,

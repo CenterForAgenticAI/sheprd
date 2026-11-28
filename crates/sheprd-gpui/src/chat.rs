@@ -35,7 +35,7 @@ pub(crate) mod modes;
 pub(crate) mod page;
 pub(crate) mod pasted;
 mod pick;
-mod prepared;
+pub(crate) mod prepared;
 #[cfg(feature = "integration-test")]
 pub(crate) mod preview;
 pub(crate) mod pull_requests;

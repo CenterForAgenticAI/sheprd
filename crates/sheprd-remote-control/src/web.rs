@@ -38,7 +38,7 @@ mod update;
 mod uploads;
 mod workspace;
 
-pub(crate) use api::{NEW_CHAT_WAIT, check_new_workspace, parse_agent};
+pub(crate) use api::{NEW_CHAT_WAIT, check_new_workspace, parse_agent, valid_branch};
 pub(crate) use favorites::{Kept as Favorites, follow_boot as follow_favorite_boot};
 pub(crate) use fragments::folders;
 pub(crate) use indicators::{Indicators, Look};
@@ -305,6 +305,7 @@ pub(crate) fn router(state: Shared) -> Router {
         .route("/api/v2/read", post(read::post))
         .route("/api/v2/live", get(crate::native::live))
         .route("/api/v2/new", get(crate::native::new_options))
+        .route("/api/v2/new/sources", get(crate::native::new_sources))
         .route("/api/v2/projects", post(crate::native::create_project))
         .route("/api/v2/search", get(crate::native::search))
         .route(
@@ -549,6 +550,8 @@ pub(crate) enum ApiError {
     Project(#[from] crate::native::project::Error),
     #[error(transparent)]
     Push(#[from] crate::push::Error),
+    #[error(transparent)]
+    Source(#[from] crate::native::SourceError),
     #[error("too many connections from this device")]
     TooManyStreams,
     #[error("sign in again")]
@@ -568,6 +571,7 @@ impl IntoResponse for ApiError {
             Self::Changes(error) => error.status(),
             Self::GitHub(error) => error.status(),
             Self::Project(error) => error.status(),
+            Self::Source(error) => error.status(),
             Self::TooManyStreams => StatusCode::TOO_MANY_REQUESTS,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Auth(auth::Error::RateLimited | auth::Error::NearbyBusy) => {

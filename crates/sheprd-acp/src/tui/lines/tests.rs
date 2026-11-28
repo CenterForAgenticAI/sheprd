@@ -149,3 +149,21 @@ fn effect_lines_are_left_out_but_their_text_stays() {
         1
     );
 }
+
+#[test]
+fn interaction_directives_keep_their_title_and_body_in_terminals() {
+    let entry = Entry {
+        id: EntryId(2),
+        kind: EntryKind::Agent {
+            text: ":::urgent Tap your YubiKey\nWaiting on git push\n:::\n::cue yubikey".to_owned(),
+        },
+    };
+    let shown = plain(&super::entry(&entry, 40));
+    let shown: Vec<&str> = shown.iter().map(|line| line.trim()).collect();
+    assert!(shown.contains(&"Tap your YubiKey"), "{shown:?}");
+    assert!(shown.contains(&"Waiting on git push"), "{shown:?}");
+    assert!(
+        !shown.iter().any(|line| line.starts_with("::")),
+        "{shown:?}"
+    );
+}

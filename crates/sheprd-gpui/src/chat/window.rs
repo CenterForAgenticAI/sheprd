@@ -155,6 +155,7 @@ impl SheprdWindow {
             }
         }
         changed |= self.chats.poll(now);
+        self.sync_chat_interactions(window, cx);
         self.chats.log_focused_attachment(
             &known,
             self.live.snapshot.as_deref(),

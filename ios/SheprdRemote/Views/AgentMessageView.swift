@@ -30,6 +30,10 @@ struct AgentMessageView: View {
                     ) {
                         MarkdownView(blocks: blocks)
                     }
+                case let .interaction(interaction):
+                    AgentInteractionCard(interaction: interaction)
+                case .cue:
+                    EmptyView()
                 }
             }
             if let screen = message.screen, let effects {

@@ -112,9 +112,12 @@ fn an_older_program_is_told_from_an_unreachable_host() {
 
 #[test]
 fn a_greeting_host_multiplexes() {
-    // A host's greeting by hand, then it waits for frames.
+    // A host's greeting by hand, then it waits for frames. The shell stays
+    // to hold its stdout open: `exec cat >/dev/null` would close the only
+    // writer, and the multiplexer would end on that end of file, racing
+    // the check below.
     let hello = r"\001\000\000\000\000\020\000\000\000SHEPRDMX\001\000\000\000\100\000\000\000";
-    let mux = spawn(shell(&format!("printf '{hello}'; exec cat >/dev/null")), ()).unwrap();
+    let mux = spawn(shell(&format!("printf '{hello}'; cat >/dev/null")), ()).unwrap();
     assert!(!mux.is_ended());
     mux.shutdown();
 }

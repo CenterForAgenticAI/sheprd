@@ -80,10 +80,16 @@ final class PullRequestsProvider: Provider {
         guard !refreshing else { return }
         refreshing = true
         Task {
-            await direct.refreshLists(source: model.fleet.gitHubLenders)
+            await direct.refreshLists(source: model.fleet.gitHubLenders, states: filter.states)
             refreshing = false
             publish()
         }
+    }
+
+    /// The PRs tab's filter, as the SwiftUI tab keeps it: the states read
+    /// are the ones it shows.
+    private var filter: PullRequestFilter {
+        UserDefaults.standard.string(forKey: PullRequestFilter.key).flatMap(PullRequestFilter.init(rawValue:)) ?? PullRequestFilter()
     }
 
     private var sort: PullRequestSort {

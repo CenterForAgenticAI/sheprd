@@ -437,6 +437,20 @@ private struct ChatDocument: View {
         .scrollDismissesKeyboard(.interactively)
         .coordinateSpace(.named(ChatEffectsModel.space))
         .environment(\.chatEffects, store.effects)
+        .environment(\.sendChatReply, { [fleet = model.fleet, key, terminal] text in
+            if terminal != nil {
+                do {
+                    try await fleet.call(key.device) { client, token in
+                        try await client.termPaste(text, pane: key.pane, bearer: token)
+                        try await client.termKeys(["enter"], pane: key.pane, bearer: token)
+                    }
+                    return nil
+                } catch {
+                    return error.localizedDescription
+                }
+            }
+            return await fleet.send(.prompt(text: text, attachments: []), to: key)
+        })
         .modifier(WizzShake(since: store.effects.ledger.playing(at: .now).flatMap { $0.effect == .wizz ? $0.since : nil }))
         // A screen effect plays over the chat alone, never the composer,
         // and takes no touches.
