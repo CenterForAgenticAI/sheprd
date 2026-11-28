@@ -72,13 +72,7 @@ fn lookup(view: &SheprdWindow, caller: &Caller) -> Result<(Place, Lookup), Respo
         None => {
             let (snapshot, workspace) = place
                 .snapshot(view)
-                .and_then(|snapshot| {
-                    let workspace = snapshot
-                        .workspaces
-                        .iter()
-                        .find(|workspace| workspace.workspace_id == place.workspace)?;
-                    Some((snapshot, workspace))
-                })
+                .zip(place.workspace(view))
                 .ok_or_else(|| {
                     Response::error(
                         ErrorCode::WorkspaceNotFound,

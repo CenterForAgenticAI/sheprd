@@ -88,6 +88,7 @@ fn a_linked_route_reads_its_repository_with_its_own_branch(cx: &mut gpui::TestAp
     });
 }
 
+#[cfg(unix)]
 fn attach_root_pane(
     snapshot: &mut sheprd_client::protocol::ClientShellSnapshot,
     workspace_id: &str,
