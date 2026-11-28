@@ -74,7 +74,13 @@ private final class LuauScreen {
     init(model: AppModel) {
         let folder = Bundle.main.url(forResource: "Luau/pull-requests", withExtension: nil)
             ?? Bundle.main.bundleURL.appending(path: "Luau/pull-requests")
+        #if DEBUG
+        // An agent's files over the bundled ones (`sheprd phone luau`).
+        workspace = Workspace(folders: LuauLive.folders("pull-requests", bundled: folder))
+        LuauLive.shared.register(workspace, screen: "pull-requests")
+        #else
         workspace = Workspace(folders: Folders(builtin: folder))
+        #endif
         provider = PullRequestsProvider(model: model)
         workspace.attach(provider)
         workspace.reload()

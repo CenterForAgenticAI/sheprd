@@ -554,6 +554,9 @@ pairs, approves, or changes a setting from here. Remote control must be on.
 | `phone guide TEXT [--highlight TARGET]` | Replace the persistent top banner, optionally highlighting a control; maximum three lines including the source |
 | `phone guide --clear` | Clear this computer's banner and highlight; tapping the banner also dismisses both and opens the caller's chat, and its close button only dismisses |
 | `phone show TEXT` | A note on the phone, from this computer's agent (at most 500 characters); tapping it opens the caller's chat |
+| `phone luau DIR [--screen NAME] [--watch]` | Lay a Luau screen's `.luau` files (a folder named as the app's, such as `ios/Luau/pull-requests`) over the ones the app bundles; it reloads keeping its state, and the answer lists what loading found: problems (exits 1), warnings, the last logs. `--watch` pushes again on every save until stopped, prints each answer (one JSON object a line with `--json`), and pushes again every 3 seconds a save the phone did not take, as while it is locked. A debug build of the app only; a TestFlight or App Store build refuses |
+| `phone luau DIR --reset` | Back to the bundled Luau of that screen |
+| `phone snapshot [--out FILE]` | A JPEG of what the app shows, written to FILE or printed as a path; the person sees a note that it was taken. Refused while it shows another computer's chat or terminal, or a tab while another computer is paired. A debug build only |
 
 Every `phone` command takes `--device ID|NAME`; without it, the phone with
 the most recent connection traffic is selected. This is not proof of user
@@ -592,6 +595,8 @@ of `locked`, `not_found`, `off`, or `other`.
 sheprd phone open
 sheprd phone open changes
 sheprd phone show "Tests pass; the PR is ready for review"
+sheprd phone luau ios/Luau/pull-requests --watch
+sheprd phone snapshot --out /tmp/phone.jpg
 sheprd phone state --json
 ```
 

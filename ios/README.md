@@ -177,6 +177,14 @@ Developer › PRs Tab switches between SwiftUI (the default) and Luau at once.
 Everything Luau is behind `PullRequestsTab`, `SheprdRemote/Luau/`, and
 `Luau/`, so dropping it is one revert.
 
+- **Live from the computer:** in a debug build, `sheprd phone luau
+  ios/Luau/pull-requests --watch` lays the folder's files over the bundled
+  ones on each save (`LuauLive`, kept in Application Support/LuauLive) and
+  prints what loading them found; `sheprd phone snapshot --out shot.jpg`
+  brings back a picture of the app, so an agent sees its change land.
+  `--reset` goes back to the bundle. In the simulator loop,
+  `tools/remote_control.py STATE phone '{"command":"snapshot"}'` asks the
+  sandbox daemon directly.
 - **Store builds:** the app links MoonKit and MoonUI, never MoonLive, so only
   the bundled Luau runs. `tools/luau_store_audit.sh` (in CI) builds Release
   and fails on any trace of live editing.

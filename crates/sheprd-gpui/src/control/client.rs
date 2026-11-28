@@ -99,6 +99,11 @@ impl Output {
         })
     }
 
+    /// The text a person reads.
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+
     /// Done, but with nothing to report: exits [`exit::NOTHING`].
     pub(crate) fn nothing(mut self) -> Self {
         self.status = exit::NOTHING;
