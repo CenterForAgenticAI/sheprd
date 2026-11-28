@@ -24,6 +24,10 @@ const SNIFF: usize = 8000;
 /// Paths asked about generated code per call, and in all.
 const ATTRIBUTE_CHUNK: usize = 500;
 const ATTRIBUTE_FILES: usize = 10_000;
+/// Bounded per-pass budgets for counting untracked text files' lines.
+const MAX_UNTRACKED_COUNT_FILES: usize = 256;
+const MAX_UNTRACKED_COUNT_BYTES: u64 = 16 * 1024 * 1024;
+const COUNT_BUFFER_BYTES: usize = 8192;
 
 /// Where a review's lines come from: the checkout, what it is compared
 /// with, and how.
@@ -441,6 +445,103 @@ pub(super) fn untracked(root: &Path, name: &str, asked: bool) -> Body {
         return Body::Binary;
     }
     Body::Loaded(Arc::new(Lines::added(&String::from_utf8_lossy(&contents))))
+}
+
+/// Counts lines for untracked regular text files in `loaded` within bounded
+/// file-count, per-file-size, and total-byte budgets. Binary files, symlinks,
+/// oversized files, and files past the budget stay uncounted (`None`).
+/// Blocking.
+pub(crate) fn count_untracked(loaded: &mut Loaded) {
+    let root = Path::new(&loaded.source.checkout);
+    count_untracked_in(
+        root,
+        &mut loaded.diff.files,
+        MAX_UNTRACKED_COUNT_FILES,
+        MAX_UNTRACKED_COUNT_BYTES,
+    );
+}
+
+pub(super) fn count_untracked_in(
+    root: &Path,
+    files: &mut [FileDiff],
+    max_files: usize,
+    max_bytes: u64,
+) {
+    let mut counted = 0usize;
+    let mut remaining_bytes = max_bytes;
+    for file in files {
+        if file.status != Status::Untracked || file.added.is_some() {
+            continue;
+        }
+        if counted >= max_files || remaining_bytes == 0 {
+            break;
+        }
+        let limit = AUTO_FILE_BYTES.min(remaining_bytes);
+        let Some(bytes) = size(root, file.git_path()) else {
+            continue;
+        };
+        if bytes > limit {
+            continue;
+        }
+        counted += 1;
+        let (read_bytes, lines) = count_text_lines(&root.join(file.git_path()), limit);
+        remaining_bytes = remaining_bytes.saturating_sub(read_bytes);
+        if let Some(lines) = lines {
+            file.added = Some(lines);
+            file.removed = Some(0);
+        }
+    }
+}
+
+/// Streams a regular file up to `limit` bytes, returning `(bytes_read, Some(lines))`
+/// for text or `(bytes_read, None)` for binary, unreadable, non-regular, or
+/// oversized files.
+fn count_text_lines(path: &Path, limit: u64) -> (u64, Option<u32>) {
+    let Ok(file) = std::fs::File::open(path) else {
+        return (0, None);
+    };
+    if !file
+        .metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.len() <= limit)
+    {
+        return (0, None);
+    }
+    let mut reader = file.take(limit.saturating_add(1));
+    let mut buf = [0u8; COUNT_BUFFER_BYTES];
+    let mut total_bytes = 0u64;
+    let mut newlines = 0u64;
+    let mut last_byte = 0u8;
+    loop {
+        let Ok(n) = reader.read(&mut buf) else {
+            return (total_bytes, None);
+        };
+        if n == 0 {
+            break;
+        }
+        let chunk = &buf[..n];
+        if total_bytes < SNIFF as u64 {
+            let sniff_len = ((SNIFF as u64 - total_bytes) as usize).min(n);
+            if chunk[..sniff_len].contains(&0) {
+                return (total_bytes.saturating_add(n as u64), None);
+            }
+        }
+        total_bytes = total_bytes.saturating_add(n as u64);
+        if total_bytes > limit {
+            return (total_bytes, None);
+        }
+        newlines = newlines.saturating_add(chunk.iter().filter(|&&b| b == b'\n').count() as u64);
+        if let Some(&last) = chunk.last() {
+            last_byte = last;
+        }
+    }
+    let lines = if total_bytes == 0 {
+        0
+    } else if last_byte == b'\n' {
+        newlines
+    } else {
+        newlines.saturating_add(1)
+    };
+    (total_bytes, Some(lines.min(u32::MAX.into()) as u32))
 }
 
 /// Reads the lines of `requests`, each paired with its file's index;

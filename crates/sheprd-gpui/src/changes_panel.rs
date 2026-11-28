@@ -13,8 +13,17 @@ use std::time::{Duration, Instant};
 /// same cadence because equal line totals do not prove the paths stayed put.
 const FILES_REFRESH: Duration = Duration::from_secs(5);
 
-fn refresh_due(last_started: Option<Instant>, now: Instant) -> bool {
-    last_started.is_none_or(|last| now.duration_since(last) >= FILES_REFRESH)
+fn refresh_due(active: bool, last_started: Option<Instant>, now: Instant) -> bool {
+    active && last_started.is_none_or(|last| now.duration_since(last) >= FILES_REFRESH)
+}
+
+fn should_start_scan(
+    active: bool,
+    loading: bool,
+    refresh_pending: bool,
+    initial_load: bool,
+) -> bool {
+    !loading && refresh_pending && (active || initial_load)
 }
 
 #[derive(Default)]
@@ -57,6 +66,7 @@ impl SheprdWindow {
             self.mods.changes.request = self.mods.changes.request.wrapping_add(1);
             self.mods.changes.checkout = Some(checkout.clone());
             self.mods.changes.seen = None;
+            self.mods.changes.last_started = None;
             self.mods.changes.refresh_pending = true;
             self.mods.changes.state = State::Loading;
         }
@@ -66,11 +76,17 @@ impl SheprdWindow {
             self.mods.changes.seen = Some(status);
             self.mods.changes.refresh_pending = true;
         }
-        let due = refresh_due(self.mods.changes.last_started, Instant::now());
+        let due = refresh_due(self.active, self.mods.changes.last_started, Instant::now());
         if due {
             self.mods.changes.refresh_pending = true;
         }
-        if self.mods.changes.loading || !self.mods.changes.refresh_pending {
+        let initial_load = matches!(self.mods.changes.state, State::Idle | State::Loading);
+        if !should_start_scan(
+            self.active,
+            self.mods.changes.loading,
+            self.mods.changes.refresh_pending,
+            initial_load,
+        ) {
             return checkout_changed;
         }
 
@@ -79,9 +95,11 @@ impl SheprdWindow {
         self.mods.changes.refresh_pending = false;
         self.mods.changes.last_started = Some(Instant::now());
         let request = self.mods.changes.request;
-        let loading = cx
-            .background_executor()
-            .spawn(async move { diff::load(&checkout, Scope::Uncommitted, None, None, false) });
+        let loading = cx.background_executor().spawn(async move {
+            let mut loaded = diff::load(&checkout, Scope::Uncommitted, None, None, false)?;
+            diff::count_untracked(&mut loaded);
+            Ok::<_, crate::Error>(loaded)
+        });
         cx.spawn(async move |this, cx| {
             let result = loading.await;
             this.update(cx, |this, cx| {
@@ -250,8 +268,19 @@ mod tests {
     #[test]
     fn file_list_refreshes_even_when_git_totals_stay_the_same() {
         let now = Instant::now();
-        assert!(refresh_due(None, now));
-        assert!(!refresh_due(Some(now - Duration::from_secs(1)), now));
-        assert!(refresh_due(Some(now - FILES_REFRESH), now));
+        assert!(refresh_due(true, None, now));
+        assert!(!refresh_due(true, Some(now - Duration::from_secs(1)), now));
+        assert!(refresh_due(true, Some(now - FILES_REFRESH), now));
+    }
+
+    #[test]
+    fn background_windows_pause_periodic_scans_until_active() {
+        let now = Instant::now();
+        assert!(!refresh_due(false, None, now));
+        assert!(!refresh_due(false, Some(now - FILES_REFRESH), now));
+        assert!(!should_start_scan(false, false, true, false));
+        assert!(should_start_scan(false, false, true, true));
+        assert!(should_start_scan(true, false, true, false));
+        assert!(!should_start_scan(true, true, true, false));
     }
 }

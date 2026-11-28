@@ -334,4 +334,5 @@ mod large;
 mod line_endings;
 mod pick_base;
 mod split;
+mod untracked_counts;
 mod words;

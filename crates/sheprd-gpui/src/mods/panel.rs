@@ -85,10 +85,13 @@ impl SheprdWindow {
         (width >= MIN_PANEL).then_some(width)
     }
 
-    /// Whether the panel is drawn now, opening or open, for the focus
-    /// regions; only beside the terminals, never over a section or app.
+    /// Whether the panel is drawn now, opening or open, and has keyboard stops
+    /// for the focus regions; only beside the terminals, never over a section
+    /// or app. A panel showing only the read-only Changed section has no
+    /// interactive controls, so F6 skips straight to the status bar.
     pub(crate) fn mod_panel_shown(&self) -> bool {
         self.mods.panel.motion.is_open()
+            && !self.mods.panel_sections().is_empty()
             && !self.zen_layout()
             && self.activity_section().is_none()
             && self.mod_app().is_none()
