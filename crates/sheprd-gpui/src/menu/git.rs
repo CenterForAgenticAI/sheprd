@@ -166,7 +166,12 @@ impl SheprdWindow {
                     .iter()
                     .find(|workspace| workspace.focused)
             })?;
-        crate::pull_request::workspace_input(workspace, &crate::pull_request::Origin::Local).ok()
+        super::pr::snapshot_workspace_input(
+            snapshot,
+            workspace,
+            &crate::pull_request::Origin::Local,
+        )
+        .ok()
     }
 
     pub(crate) fn open_git_menu(

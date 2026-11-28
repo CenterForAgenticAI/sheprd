@@ -665,7 +665,7 @@ impl SheprdWindow {
 /// `workspace_input`, except a main checkout whose focused pane wandered off
 /// while its first tab's root pane stayed in the kept repository is still
 /// looked up by that repository's Git directory and its reported branch.
-pub(super) fn snapshot_workspace_input(
+pub(crate) fn snapshot_workspace_input(
     snapshot: &ClientShellSnapshot,
     workspace: &ClientShellWorkspace,
     origin: &Origin,

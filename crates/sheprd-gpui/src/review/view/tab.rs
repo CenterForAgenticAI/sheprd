@@ -115,11 +115,17 @@ impl SheprdWindow {
             if !self.local_git_endpoint(index) {
                 return None;
             }
-            let space = snapshot?
+            let snapshot = snapshot?;
+            let space = snapshot
                 .workspaces
                 .iter()
                 .find(|space| space.workspace_id == workspace)?;
-            crate::pull_request::workspace_input(space, &crate::pull_request::Origin::Local).ok()?
+            crate::menu::snapshot_workspace_input(
+                snapshot,
+                space,
+                &crate::pull_request::Origin::Local,
+            )
+            .ok()?
         };
         let checkout = ReviewCheckout::try_from(&input).ok()?;
         let agent = snapshot.filter(|_| core.is_none()).and_then(|snapshot| {

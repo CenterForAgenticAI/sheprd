@@ -191,3 +191,71 @@ fn a_missing_pull_request_says_when_the_github_app_waits_on_the_user(cx: &mut Te
         })
     });
 }
+
+#[gpui::test]
+#[cfg(unix)]
+fn a_wandered_pane_finds_its_repository_pr_through_the_cli(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx);
+    cx.update(|_, cx| {
+        view.update(cx, |view, _| {
+            signed_in(view);
+            let root = REPO_KEY.trim_end_matches("/.git");
+            {
+                let snapshot = std::sync::Arc::make_mut(view.live.snapshot.as_mut().unwrap());
+                snapshot.workspaces[3].new_workspace_cwd = "/Users/me".into();
+                snapshot.tabs.push(sheprd_client::protocol::ClientShellTab {
+                    tab_id: "w3:t1".into(),
+                    workspace_id: "w3".into(),
+                    number: 1,
+                    label: "1".into(),
+                    custom_label: false,
+                    zoomed: false,
+                    focused: false,
+                    agent_status: sheprd_client::protocol::AgentStatus::Idle,
+                });
+                snapshot
+                    .panes
+                    .push(sheprd_client::protocol::ClientShellPane {
+                        pane_id: "w3:p1".into(),
+                        workspace_id: "w3".into(),
+                        tab_id: "w3:t1".into(),
+                        label: None,
+                        cwd: Some(root.into()),
+                        foreground_cwd: None,
+                        focused: false,
+                        right_click_passthrough: false,
+                    });
+            }
+            view.menu
+                .pr_cache
+                .seed(input(), fixture().unwrap(), std::time::Instant::now());
+            let Response::Host {
+                reply:
+                    Reply::Pr {
+                        pr: Some(pr),
+                        note: None,
+                    },
+            } = status(view, &caller(Some("w3")))
+            else {
+                panic!("expected the repository pull request");
+            };
+            assert_eq!(pr.number, 8);
+
+            // Moving the root pane into another repository with the same folder
+            // name switches the CLI lookup away from the left repository.
+            {
+                let snapshot = std::sync::Arc::make_mut(view.live.snapshot.as_mut().unwrap());
+                snapshot.workspaces[3].new_workspace_cwd = "/other/agent-launcher".into();
+                snapshot.workspaces[3].label = "agent-launcher".into();
+                snapshot.panes.last_mut().unwrap().cwd = Some("/other/agent-launcher".into());
+            }
+            let Response::Host {
+                reply: Reply::Pr { pr: None, note },
+            } = status(view, &caller(Some("w3")))
+            else {
+                panic!("expected lookup to stop matching the left repository");
+            };
+            assert!(note.unwrap().contains("still looking"));
+        })
+    });
+}

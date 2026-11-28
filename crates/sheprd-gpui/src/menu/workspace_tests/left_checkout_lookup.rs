@@ -140,6 +140,7 @@ fn a_wandered_pane_schedules_retains_and_presents_its_repository_pr(cx: &mut gpu
             {
                 let snapshot = std::sync::Arc::make_mut(view.live.snapshot.as_mut().unwrap());
                 snapshot.workspaces = sidebar::layout_tests::snapshot(7).workspaces;
+                snapshot.focused_workspace_id = Some("w3".into());
                 snapshot.workspaces[3].new_workspace_cwd = "/Users/me".into();
                 attach_root_pane(snapshot, "w3", root);
             }
@@ -148,6 +149,7 @@ fn a_wandered_pane_schedules_retains_and_presents_its_repository_pr(cx: &mut gpu
                 repo_key: Some(sidebar::layout_tests::REPO_KEY.into()),
                 branch: "develop".into(),
             };
+            assert_eq!(view.git_input(), Some(expected.clone()));
             // Background scheduling uses the same `repo_key` input on local
             // and SSH hosts alike.
             {
