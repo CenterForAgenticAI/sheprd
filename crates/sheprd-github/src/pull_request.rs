@@ -22,7 +22,8 @@ pub use {
     lookup::Lookup,
     model::{
         CheckDetail, Input, MergeMethod, Origin, Outcome, PullRequest, ReviewDecision, Standing,
-        State, Tone, clean, fork_branch_number, key_input, repository_input, workspace_input,
+        State, Tone, clean, fork_branch_number, key_input, key_input_on, repository_input,
+        workspace_input,
     },
     remote::{Base, Remote, base_repository, remote_repository},
     stack::{Blocker, LAYER_LIMIT, Layer, QueueEntry, QueueState, Stack, Verdict},

@@ -153,7 +153,7 @@ impl Place {
         self.index == view.selected_endpoint
     }
 
-    fn snapshot<'a>(&self, view: &'a SheprdWindow) -> Option<&'a ClientShellSnapshot> {
+    pub(super) fn snapshot<'a>(&self, view: &'a SheprdWindow) -> Option<&'a ClientShellSnapshot> {
         let live = if self.selected(view) {
             &view.live
         } else {

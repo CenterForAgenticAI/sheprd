@@ -13,9 +13,9 @@ use crate::{
             QueueInfo, QueueOp, Reply, StackInfo,
         },
     },
-    menu::PrChange,
+    menu::{PrChange, snapshot_workspace_input},
     pr_actions::{Comment, Target},
-    pull_request::{MergeState, PullRequest, ReviewDecision, State, Verdict, workspace_input},
+    pull_request::{MergeState, PullRequest, ReviewDecision, State, Verdict},
 };
 use gpui::{App, Context, Window};
 use std::time::Duration;
@@ -70,13 +70,16 @@ fn lookup(view: &SheprdWindow, caller: &Caller) -> Result<(Place, Lookup), Respo
             ));
         }
         None => {
-            let workspace = place.workspace(view).ok_or_else(|| {
-                Response::error(
-                    ErrorCode::WorkspaceNotFound,
-                    format!("Workspace {} closed", place.workspace),
-                )
-            })?;
-            workspace_input(workspace, &origin)
+            let (snapshot, workspace) = place
+                .snapshot(view)
+                .zip(place.workspace(view))
+                .ok_or_else(|| {
+                    Response::error(
+                        ErrorCode::WorkspaceNotFound,
+                        format!("Workspace {} closed", place.workspace),
+                    )
+                })?;
+            snapshot_workspace_input(snapshot, workspace, &origin)
                 .map_err(|error| Response::error(ErrorCode::InvalidRequest, error.to_string()))?
         }
     };

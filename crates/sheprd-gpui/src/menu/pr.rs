@@ -67,8 +67,10 @@ impl SheprdWindow {
             let origin = self.pr_origin();
             // Only this machine can stand a workspace's directory in for
             // missing daemon metadata; see `workspace_input`.
+            let has_repository = target.worktree.is_some()
+                || matches!(target.source, super::workspace::Source::Repository { .. });
             if target.branch.as_deref().is_none_or(str::is_empty)
-                || (target.worktree.is_none() && origin != Some(Origin::Local))
+                || (!has_repository && origin != Some(Origin::Local))
             {
                 return Err(sheprd_github::pull_request::Error::Metadata.into());
             }
@@ -195,7 +197,7 @@ impl SheprdWindow {
             workspace.workspace_id == target.id
                 && super::workspace::known_worktree(workspace) == target.worktree
                 && workspace.branch == target.branch
-                && target.addresses(workspace)
+                && target.addresses(snapshot, workspace)
         })
     }
 
@@ -204,7 +206,9 @@ impl SheprdWindow {
     /// Herdr keeps for it is looked up by its current directory, which
     /// `workspace_input` already prefers over that metadata. A linked
     /// checkout routed through such a main checkout is looked up by its
-    /// repository's Git directory and its own branch, which belong together.
+    /// repository's Git directory and its own branch, which belong together;
+    /// so is a main checkout only one of whose panes wandered off, by its
+    /// reported branch, which is still its repository's.
     pub(super) fn menu_target_input(&self, origin: &Origin) -> crate::Result<Input> {
         let target = self
             .menu
@@ -219,19 +223,27 @@ impl SheprdWindow {
             return crate::pull_request::kept_input(&workspace, *origin != Origin::Local)
                 .ok_or_else(|| sheprd_github::pull_request::Error::Metadata.into());
         }
+        let snapshot = self
+            .live
+            .snapshot
+            .as_deref()
+            .ok_or(crate::Error::StaleWorkspace)?;
         let workspace = self
             .menu_target_workspace()
             .ok_or(crate::Error::StaleWorkspace)?;
-        match (&target.source, &target.base) {
+        match (
+            &target.source,
+            target.base.as_ref().or(target.branch.as_ref()),
+        ) {
             (super::workspace::Source::Repository { key, .. }, Some(branch)) => {
                 crate::worktree::validate_branch(branch)?;
-                Ok(Input {
-                    checkout: None,
-                    repo_key: Some(key.clone()),
-                    branch: branch.clone(),
-                })
+                Ok(crate::pull_request::key_input_on(
+                    key,
+                    Some(branch),
+                    origin,
+                )?)
             }
-            _ => Ok(workspace_input(workspace, origin)?),
+            _ => Ok(snapshot_workspace_input(snapshot, workspace, origin)?),
         }
     }
 
@@ -275,7 +287,7 @@ impl SheprdWindow {
                         core.as_ref() == Some(input)
                             || kept.iter().any(|(_, kept)| kept == input)
                             || snapshot.workspaces.iter().any(|workspace| {
-                                workspace_input(workspace, &origin)
+                                snapshot_workspace_input(snapshot, workspace, &origin)
                                     .is_ok_and(|candidate| &candidate == input)
                             })
                     });
@@ -292,7 +304,7 @@ impl SheprdWindow {
                         .workspaces
                         .iter()
                         .find(|workspace| Some(workspace.workspace_id.as_str()) == priority)
-                        && let Ok(input) = workspace_input(workspace, &origin)
+                        && let Ok(input) = snapshot_workspace_input(snapshot, workspace, &origin)
                     {
                         self.menu.pr_cache.expire_viewed(&input, now);
                     }
@@ -570,10 +582,15 @@ impl SheprdWindow {
         &mut self,
         value: crate::pull_request::PullRequest,
     ) -> crate::Result<()> {
+        let snapshot = self
+            .live
+            .snapshot
+            .as_deref()
+            .ok_or(crate::Error::StaleWorkspace)?;
         let workspace = self
             .menu_target_workspace()
             .ok_or(crate::Error::StaleWorkspace)?;
-        let input = workspace_input(workspace, &Origin::Local)?;
+        let input = snapshot_workspace_input(snapshot, workspace, &Origin::Local)?;
         self.menu.github = crate::github::Auth::connected_fixture();
         self.seed_pr(input, value, std::time::Instant::now());
         self.refresh_workspace_pr();
@@ -644,7 +661,24 @@ impl SheprdWindow {
     }
 }
 
-fn workspace_pr_inputs<'a>(
+/// The pull request lookup key for `workspace` in `snapshot`: like
+/// `workspace_input`, except a main checkout whose focused pane wandered off
+/// while its first tab's root pane stayed in the kept repository is still
+/// looked up by that repository's Git directory and its reported branch.
+pub(crate) fn snapshot_workspace_input(
+    snapshot: &ClientShellSnapshot,
+    workspace: &ClientShellWorkspace,
+    origin: &Origin,
+) -> sheprd_github::Result<Input> {
+    if let super::workspace::Source::Repository { key, .. } =
+        super::workspace::Source::of(snapshot, workspace)
+    {
+        return crate::pull_request::key_input_on(&key, workspace.branch.as_deref(), origin);
+    }
+    workspace_input(workspace, origin)
+}
+
+pub(super) fn workspace_pr_inputs<'a>(
     snapshot: &'a ClientShellSnapshot,
     origin: &'a Origin,
     open: Option<&'a str>,
@@ -662,7 +696,7 @@ fn workspace_pr_inputs<'a>(
             cursor.is_multiple_of(2) && Some(workspace.workspace_id.as_str()) == priority
         })
         .chain(snapshot.workspaces.iter().cycle().skip(start).take(count))
-        .filter_map(|workspace| workspace_input(workspace, origin).ok())
+        .filter_map(|workspace| snapshot_workspace_input(snapshot, workspace, origin).ok())
 }
 
 #[cfg(test)]

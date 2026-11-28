@@ -14,11 +14,14 @@ mod reuse;
 #[cfg(feature = "cloud")]
 mod sandbox_images;
 mod scripts;
+mod source;
 
 pub(super) use kept_worktrees::Ask;
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 pub(crate) use kept_worktrees::Landing as KeptLanding;
 pub(crate) use kept_worktrees::{KeptDone, remove_kept_checkout_on};
+use source::left_checkout;
+pub(super) use source::{Source, known_worktree};
 
 use super::{Page, WorkspaceAction, WorkspaceMenuAction, state::Deletion};
 use crate::{SheprdWindow, dialog_input::DialogInput, i18n::fl};
@@ -64,35 +67,6 @@ impl WorkspaceTarget {
     }
 }
 
-/// How a worktree request tells the daemon which repository it is for.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum Source {
-    /// By workspace: the daemon branches the repository it keeps for it.
-    Workspace,
-    /// By directory, which the daemon resolves to its repository. Herdr keeps
-    /// the repository a workspace was first given while its directory, and the
-    /// label drawn from it, follow the shell: a workspace Teleport opened on
-    /// one repository whose shell then moved into another would otherwise
-    /// branch the first one under the second one's name.
-    Directory(String),
-    /// A repository's main checkout directory, for a linked checkout whose
-    /// only open main checkout's shell has wandered off: the daemon refuses
-    /// a linked checkout as a source. Its Git directory, with the linked
-    /// checkout's branch, is what lookups read, since the main checkout's
-    /// reported branch is of the repository its shell moved to.
-    Repository { root: String, key: String },
-}
-
-impl Source {
-    fn of(workspace: &ClientShellWorkspace) -> Self {
-        if left_checkout(workspace) {
-            Self::Directory(workspace.new_workspace_cwd.clone())
-        } else {
-            Self::Workspace
-        }
-    }
-}
-
 impl WorkspaceTarget {
     pub(super) fn new(snapshot: &ClientShellSnapshot, workspace: &ClientShellWorkspace) -> Self {
         Self {
@@ -104,18 +78,28 @@ impl WorkspaceTarget {
             heads_group: heads_group(snapshot, workspace),
             branch: workspace.branch.clone(),
             base: None,
-            source: Source::of(workspace),
+            source: Source::of(snapshot, workspace),
             keeper: sheprd_session::Keeper::Herdr1,
             muted: false,
         }
     }
 
     /// Whether `workspace` is still named the way this target names it. A
-    /// repository root stands for its main checkout only while that main
-    /// checkout is still away from it.
-    pub(super) fn addresses(&self, workspace: &ClientShellWorkspace) -> bool {
-        match (&self.source, Source::of(workspace)) {
-            (Source::Repository { .. }, Source::Directory(_)) => true,
+    /// linked checkout routed through a moved main checkout keeps targeting its
+    /// repository while that main checkout stays kept for it and away from it;
+    /// a main-checkout target itself must still resolve to the same source.
+    pub(super) fn addresses(
+        &self,
+        snapshot: &ClientShellSnapshot,
+        workspace: &ClientShellWorkspace,
+    ) -> bool {
+        match (&self.source, Source::of(snapshot, workspace)) {
+            (Source::Repository { key, .. }, Source::Directory(_)) if self.base.is_some() => {
+                workspace
+                    .worktree
+                    .as_ref()
+                    .is_some_and(|tree| tree.key == *key && !tree.is_linked_worktree)
+            }
             (source, current) => *source == current,
         }
     }
@@ -231,7 +215,11 @@ impl WorkspaceTarget {
                 .is_some_and(|tree| tree.key == *key && !tree.is_linked_worktree),
             _ => worktree.is_some() || workspace.branch.is_some(),
         };
-        if !self.can_create() || !self.addresses(workspace) || self.worktree != worktree || !named {
+        if !self.can_create()
+            || !self.addresses(snapshot, workspace)
+            || self.worktree != worktree
+            || !named
+        {
             return Err(crate::Error::WorkspaceRepositoryChanged);
         }
         Ok(())
@@ -359,25 +347,6 @@ impl NewWorktreeUnavailable {
             Self::Detached => fl!("worktree-popover-new-detached"),
         }
     }
-}
-
-/// Whether `workspace` is a main checkout whose directory is no longer inside
-/// the repository Herdr keeps for it. A linked checkout's own path is not in
-/// the snapshot, so it is never judged.
-fn left_checkout(workspace: &ClientShellWorkspace) -> bool {
-    workspace.worktree.as_ref().is_some_and(|tree| {
-        !tree.is_linked_worktree
-            && crate::worktree::left_checkout(&tree.key, &workspace.new_workspace_cwd)
-    })
-}
-
-/// The repository `workspace` is in, as far as it can be trusted: none for a
-/// main checkout whose shell has left the repository Herdr keeps for it.
-pub(super) fn known_worktree(workspace: &ClientShellWorkspace) -> Option<ClientShellWorktree> {
-    workspace
-        .worktree
-        .clone()
-        .filter(|_| !left_checkout(workspace))
 }
 
 /// The workspace focused when the new worktree shortcut is pressed, once it

@@ -69,6 +69,7 @@ pub(crate) use state::Cover;
 pub(crate) use {
     colors::{accent, danger, online, teleported, tint},
     page::{Page, WorkspaceAction},
+    pr::snapshot_workspace_input,
     state::{MenuState, Removal},
     version_mismatch::Notice as VersionNotice,
     workspace::{KeptDone, remove_kept_checkout_on},

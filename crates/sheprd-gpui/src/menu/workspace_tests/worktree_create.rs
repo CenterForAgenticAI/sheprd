@@ -201,3 +201,181 @@ fn branch_only_workspace_can_create_until_git_identity_disappears() {
         Err(crate::Error::WorkspaceRepositoryChanged)
     ));
 }
+
+fn add_root_pane(
+    snapshot: &mut sheprd_client::protocol::ClientShellSnapshot,
+    workspace_id: &str,
+    cwd: &str,
+) {
+    let tab_id = format!("{workspace_id}:t1");
+    snapshot.tabs.retain(|tab| tab.workspace_id != workspace_id);
+    snapshot
+        .panes
+        .retain(|pane| pane.workspace_id != workspace_id);
+    snapshot.tabs.push(sheprd_client::protocol::ClientShellTab {
+        tab_id: tab_id.clone(),
+        workspace_id: workspace_id.into(),
+        number: 1,
+        label: "1".into(),
+        custom_label: false,
+        zoomed: false,
+        focused: false,
+        agent_status: sheprd_client::protocol::AgentStatus::Idle,
+    });
+    snapshot
+        .panes
+        .push(sheprd_client::protocol::ClientShellPane {
+            pane_id: format!("{workspace_id}:p1"),
+            workspace_id: workspace_id.into(),
+            tab_id,
+            label: None,
+            cwd: Some(cwd.into()),
+            foreground_cwd: None,
+            focused: false,
+            right_click_passthrough: false,
+        });
+}
+
+/// A main checkout whose focused pane runs outside the repository (a chat
+/// started in the home folder) while its first tab's root pane still stands in
+/// its repository lists and creates through the repository's root rather than
+/// sending the daemon that folder, which is not a Git work tree.
+#[test]
+fn a_main_checkout_with_a_wandered_pane_creates_from_its_repository() {
+    use crate::menu::workspace::Source;
+    let home = if cfg!(windows) {
+        "C:/Users/me"
+    } else {
+        "/Users/me"
+    };
+    let other_repo = if cfg!(windows) {
+        "C:/other/agent-launcher"
+    } else {
+        "/other/agent-launcher"
+    };
+    let mut snapshot = sidebar::layout_tests::snapshot(7);
+    let root = sidebar::layout_tests::REPO_KEY.trim_end_matches("/.git");
+    add_root_pane(&mut snapshot, "w3", root);
+    snapshot.workspaces[3].new_workspace_cwd = home.into();
+    let target = WorkspaceTarget::for_new_worktree(&snapshot, &snapshot.workspaces[3]).unwrap();
+    assert_eq!(
+        target.source,
+        Source::Repository {
+            root: root.into(),
+            key: sidebar::layout_tests::REPO_KEY.into(),
+        }
+    );
+    assert_eq!(
+        target.list_params(),
+        serde_json::json!({"cwd": root, "trust_repository": false})
+    );
+    assert_eq!(
+        target
+            .request(&snapshot, WorkspaceAction::NewWorktree, "feature/next")
+            .unwrap(),
+        (
+            Method::WorktreeCreate,
+            serde_json::json!({"cwd": root, "base": "HEAD", "focus": true,
+                "trust_repository": false, "branch": "feature/next"})
+        )
+    );
+    assert_eq!(
+        target
+            .request(&snapshot, WorkspaceAction::OpenWorktree, "/elsewhere")
+            .unwrap()
+            .1,
+        serde_json::json!({"cwd": root, "path": "/elsewhere", "focus": true,
+            "trust_repository": false})
+    );
+    // Once the pane returns, the dialog it opened names a source the
+    // workspace no longer has, so it refuses rather than guess.
+    let mut back = snapshot.clone();
+    back.workspaces[3].new_workspace_cwd = root.into();
+    assert!(matches!(
+        target.request(&back, WorkspaceAction::NewWorktree, ""),
+        Err(crate::Error::WorkspaceRepositoryChanged)
+    ));
+    // Moving the root shell into another repository while the dialog is open
+    // must refuse rather than branch the original repository, even when the
+    // kept worktree key stays unchanged or the new repository shares the name.
+    for (cwd, label) in [("/fixture/other", "other"), (other_repo, "agent-launcher")] {
+        let mut moved = snapshot.clone();
+        add_root_pane(&mut moved, "w3", cwd);
+        moved.workspaces[3].new_workspace_cwd = cwd.into();
+        moved.workspaces[3].label = label.into();
+        for action in [WorkspaceAction::NewWorktree, WorkspaceAction::OpenWorktree] {
+            assert!(
+                matches!(
+                    target.request(&moved, action, "branch"),
+                    Err(crate::Error::WorkspaceRepositoryChanged)
+                ),
+                "{cwd} ({action:?})"
+            );
+        }
+    }
+    // A custom label still branches the repository while the root pane stays in it.
+    let mut renamed = snapshot.clone();
+    renamed.workspaces[3].custom_label = true;
+    renamed.workspaces[3].label = "my feature".into();
+    let target = WorkspaceTarget::for_new_worktree(&renamed, &renamed.workspaces[3]).unwrap();
+    assert_eq!(
+        target.source,
+        Source::Repository {
+            root: root.into(),
+            key: sidebar::layout_tests::REPO_KEY.into(),
+        }
+    );
+    // Without root-pane metadata, the client cannot verify where the workspace
+    // stands and falls back to its reported directory.
+    snapshot.panes.clear();
+    let target = WorkspaceTarget::for_new_worktree(&snapshot, &snapshot.workspaces[3]).unwrap();
+    assert_eq!(target.source, Source::Directory(home.into()));
+}
+
+/// Two repositories sharing a folder name (`/work/project` and
+/// `/other/project`) keep the same automatic label `project` when the root
+/// shell moves between them. The root pane's directory distinguishes them, so
+/// worktree actions target the current repository rather than the one left.
+#[test]
+fn a_main_checkout_moved_to_a_same_named_repository_branches_where_it_is() {
+    use crate::menu::workspace::Source;
+    let (original_key, moved_dir) = if cfg!(windows) {
+        ("C:/work/project/.git", "C:/other/project")
+    } else {
+        ("/work/project/.git", "/other/project")
+    };
+    let mut snapshot = sidebar::layout_tests::snapshot(7);
+    snapshot.workspaces[3].worktree.as_mut().unwrap().key = original_key.into();
+    snapshot.workspaces[3].worktree.as_mut().unwrap().label = "project".into();
+    snapshot.workspaces[3].label = "project".into();
+    snapshot.workspaces[3].custom_label = false;
+    snapshot.workspaces[3].new_workspace_cwd = moved_dir.into();
+    add_root_pane(&mut snapshot, "w3", moved_dir);
+
+    let target = WorkspaceTarget::for_new_worktree(&snapshot, &snapshot.workspaces[3]).unwrap();
+    assert_eq!(target.source, Source::Directory(moved_dir.into()));
+    assert_eq!(
+        target.list_params(),
+        serde_json::json!({"cwd": moved_dir, "trust_repository": false})
+    );
+    assert_eq!(
+        target
+            .request(&snapshot, WorkspaceAction::NewWorktree, "feature/next")
+            .unwrap(),
+        (
+            Method::WorktreeCreate,
+            serde_json::json!({"cwd": moved_dir, "base": "HEAD", "focus": true,
+                "trust_repository": false, "branch": "feature/next"})
+        )
+    );
+    assert_eq!(
+        target
+            .request(&snapshot, WorkspaceAction::OpenWorktree, "/elsewhere")
+            .unwrap(),
+        (
+            Method::WorktreeOpen,
+            serde_json::json!({"cwd": moved_dir, "path": "/elsewhere", "focus": true,
+                "trust_repository": false})
+        )
+    );
+}
