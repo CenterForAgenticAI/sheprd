@@ -75,7 +75,9 @@ pub(crate) fn found(cx: &mut App, done: impl FnOnce(Result<Hint, Error>, &mut Ap
             let client = client.ok_or(Error::NoDaemon)?;
             flows::daemon(&client, Ask::Found).await?;
             match flows::daemon(&client, Ask::Status).await? {
-                Answer::Status { view: Some(view) } => Ok(hint(&view)),
+                Answer::Status {
+                    view: Some(view), ..
+                } => Ok(hint(&view)),
                 _ => Err(Error::Unexpected),
             }
         }
@@ -161,7 +163,9 @@ async fn finish(
         ApprovedFleet::Joined { fleet } => {
             take_over(client, executor, target, &fleet).await?;
             match flows::daemon(client, Ask::Status).await? {
-                Answer::Status { view: Some(view) } if view.fleet == fleet => Ok(()),
+                Answer::Status {
+                    view: Some(view), ..
+                } if view.fleet == fleet => Ok(()),
                 _ => Err(Error::NotAdmitted),
             }
         }

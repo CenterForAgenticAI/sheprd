@@ -4,7 +4,8 @@
 //! base64url, so nothing here can change what was signed.
 
 use super::{
-    Body, Error, FleetId, HostId, Kind, Log, MemberId, Method, Op, OpId, Reason, Result, State,
+    Body, Error, FleetId, HostId, HostKind, Kind, Log, MemberId, Method, Op, OpId, Reason, Result,
+    State,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
@@ -286,6 +287,10 @@ pub enum Answer {
     Status {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         view: Option<Box<super::View>>,
+        /// This computer's member id, hex, even while it is in no fleet,
+        /// so Sheprd recognizes when a reached fleet already admitted it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        me: Option<String>,
     },
     Bundle {
         bundle: String,
@@ -455,12 +460,15 @@ pub fn removal_for(log: &Log, host: &HostId, heads: &[OpId]) -> Applied {
     applied
 }
 
-/// Whether `log` shares `host`, this computer as a host the fleet holds:
-/// what a daemon with no fleet that is not admitted checks before taking a
-/// log handed to it.
+/// Whether `log` shares `host`, this computer as a Sheprd host the fleet
+/// holds (not a member's own host): what a daemon with no fleet that is
+/// not admitted checks before taking a log handed to it.
 #[must_use]
 pub fn shares(log: &Log, host: &HostId) -> bool {
-    log.state().hosts.contains_key(host)
+    log.state()
+        .hosts
+        .get(host)
+        .is_some_and(|shared| shared.intro.kind == HostKind::Sheprd)
 }
 
 /// Whether `log` admits `member`: what a daemon with no fleet checks

@@ -29,6 +29,9 @@ const PEERS: &str = "peers.json";
 /// The fleet id this computer joined as a host the fleet shares, not as a
 /// member.
 const HOSTED: &str = "hosted";
+/// The fleet id this computer explicitly scrubbed: background sync never
+/// hands that fleet back until a person asks to join or share it again.
+const SCRUBBED: &str = "scrubbed";
 /// At worst, suspensions take about 23.5 MB of it (a save's first write
 /// keeping what the file held beside what is held, each folded target
 /// still within its bound), the removals kept to check again about 6 MB,
@@ -211,8 +214,13 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
         Some(_) => BTreeMap::new(),
         None => load_joining(state_dir, now_ms)?,
     };
+    let scrubbed = match log {
+        Some(_) => None,
+        None => load_scrubbed(state_dir)?,
+    };
     Ok(Inner {
         joining,
+        scrubbed,
         log,
         held: peers
             .held
@@ -320,6 +328,46 @@ pub(super) fn load_hosted(state_dir: &Path) -> Result<Option<String>> {
 pub(super) fn save_hosted(state_dir: &Path, fleet: &str) -> Result<()> {
     write_private(&path(state_dir, HOSTED), fleet.as_bytes())?;
     Ok(())
+}
+
+/// The fleet id this computer last scrubbed, if any. Blocking.
+pub(super) fn load_scrubbed(state_dir: &Path) -> Result<Option<FleetId>> {
+    Ok(
+        read_bounded(&path(state_dir, SCRUBBED), 64)?.and_then(|bytes| {
+            std::str::from_utf8(&bytes)
+                .ok()
+                .map(str::trim)
+                .and_then(FleetId::from_hex)
+        }),
+    )
+}
+
+/// Records that this computer explicitly scrubbed `fleet`. Blocking.
+pub(super) fn save_scrubbed(state_dir: &Path, fleet: FleetId) -> Result<()> {
+    write_private(&path(state_dir, SCRUBBED), fleet.to_string().as_bytes())?;
+    Ok(())
+}
+
+/// Clears the scrubbed fleet marker once a person asks to join, share, or
+/// found again. Blocking.
+pub(super) fn clear_scrubbed(state_dir: &Path) -> Result<()> {
+    remove(&path(state_dir, SCRUBBED))
+}
+
+/// Best-effort read of the fleet id on disk before an offline or unloaded
+/// scrub deletes it, so a damaged file never blocks the scrub. Blocking.
+pub(super) fn peek_fleet(state_dir: &Path) -> Option<FleetId> {
+    if let Ok(Some(hosted)) = load_hosted(state_dir)
+        && let Some(fleet) = FleetId::from_hex(hosted.trim())
+    {
+        return Some(fleet);
+    }
+    let bytes = read_bounded(&path(state_dir, LOG), saved::MAX_SAVED as u64)
+        .ok()
+        .flatten()?;
+    saved::decode(&bytes, crate::web::now_ms())
+        .ok()
+        .map(|log| log.fleet())
 }
 
 /// Removes the log and how this computer joined it, once it left the
@@ -509,6 +557,7 @@ pub(super) fn save(state_dir: &Path, inner: &Inner, on_disk: &mut Suspensions) -
     if let Some(log) = &inner.log {
         write_private(&path(state_dir, LOG), &saved::encode(log)?)?;
         remove_joining(state_dir)?;
+        clear_scrubbed(state_dir)?;
     } else {
         save_joining(state_dir, &inner.joining)?;
     }

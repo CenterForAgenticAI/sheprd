@@ -179,6 +179,10 @@ pub(crate) struct Inner {
     /// one `fleet apply` comes over several. It grants nothing; it becomes
     /// the log once it admits this computer or shares it as a host.
     pub(crate) joining: BTreeMap<FleetId, joining::Joining>,
+    /// The fleet this computer explicitly scrubbed (`fleet/scrubbed`):
+    /// unsolicited `fleet apply` handovers for it are refused until a
+    /// person asks to join, share, or found again.
+    pub(crate) scrubbed: Option<FleetId>,
     /// Removals plain hosts' agents reported suspending for that the log
     /// has not heard of, with when first and how many times
     /// (`plain::Unknown`).
@@ -388,9 +392,28 @@ impl Fleet {
         }
         .sign(&self.key)?;
         inner.log = Some(Log::found(op)?);
+        inner.scrubbed = None;
         self.save(&inner)?;
         drop(inner);
         self.bump();
+        Ok(())
+    }
+
+    /// Clears the scrubbed-fleet marker once a person explicitly asks to
+    /// join or share `fleet` (or any fleet, when `None`), so an explicit
+    /// invite/join/share after a scrub is accepted. Blocking.
+    pub(crate) fn allow_rejoin(&self, fleet: Option<FleetId>) -> Result<()> {
+        let mut inner = self.inner();
+        let clear = match (inner.scrubbed, fleet) {
+            (Some(_), None) => true,
+            (Some(scrubbed), Some(wanted)) => scrubbed == wanted,
+            (None, _) => false,
+        };
+        if !clear {
+            return Ok(());
+        }
+        store::clear_scrubbed(&self.state_dir)?;
+        inner.scrubbed = None;
         Ok(())
     }
 
@@ -450,6 +473,7 @@ impl Fleet {
                     return Err(Error::NotAdmitted);
                 };
                 inner.log = Some(log);
+                inner.scrubbed = None;
                 refused
             }
         };
@@ -629,6 +653,7 @@ impl Fleet {
         *self.scrubbed.lock().unwrap_or_else(PoisonError::into_inner) =
             session.map(|session| (std::time::Instant::now(), session));
         let mut inner = self.inner();
+        let scrubbed = inner.log.as_ref().map(Log::fleet).or(inner.scrubbed);
         // Kept when its file stays: the error is reported, and the role
         // with it.
         store::remove_log(&self.state_dir)?;
@@ -641,6 +666,12 @@ impl Fleet {
             // The peers file is gone with its suspensions: a later save
             // has none on disk to keep.
             *self.on_disk.lock().unwrap_or_else(PoisonError::into_inner) = Suspensions::default();
+        }
+        if let Some(fleet) = scrubbed {
+            inner.scrubbed = Some(fleet);
+            if let Err(error) = store::save_scrubbed(&self.state_dir, fleet) {
+                tracing::warn!(%error, "could not record the scrubbed fleet id");
+            }
         }
         drop(inner);
         self.bump();

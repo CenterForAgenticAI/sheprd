@@ -108,10 +108,16 @@ fn on_disk(
 ) -> Result<()> {
     // Read before anything goes; a peers file that does not read is kept,
     // and reported once the rest is gone.
+    let scrubbed = store::peek_fleet(state_dir);
     let proven = store::proven_keys(state_dir);
     let removed = store::remove_log(state_dir);
     forget_access(keys, state_dir)?;
     removed?;
+    if let Some(fleet) = scrubbed
+        && let Err(error) = store::save_scrubbed(state_dir, fleet)
+    {
+        tracing::warn!(%error, "could not record the scrubbed fleet id");
+    }
     revoke(&proven?)?;
     store::remove_peers(state_dir)
 }

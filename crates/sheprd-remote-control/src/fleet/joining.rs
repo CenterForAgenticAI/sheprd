@@ -54,6 +54,10 @@ impl Fleet {
         }
         let mut refused = BTreeMap::new();
         for (fleet, ops) in by_fleet {
+            if inner.scrubbed == Some(fleet) {
+                refused.insert(fleet, ops.len());
+                continue;
+            }
             let count = ops.len();
             let kept = inner.joining.remove(&fleet).map(|joining| joining.log);
             match join(kept, ops, now_ms) {
