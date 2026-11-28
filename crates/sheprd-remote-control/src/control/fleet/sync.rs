@@ -38,6 +38,12 @@ pub struct Apply {
     /// answer was on its way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peer: Option<String>,
+    /// True only when a person explicitly shared this computer as a host
+    /// (`flows::share`): lets a previously scrubbed Sheprd host accept the
+    /// shared-host handover without making background `fleet intro` reads
+    /// clear its scrub guard.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rejoin: bool,
 }
 
 /// What `fleet admit` reads on standard input: the joining computer's

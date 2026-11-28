@@ -29,9 +29,12 @@ const PEERS: &str = "peers.json";
 /// The fleet id this computer joined as a host the fleet shares, not as a
 /// member.
 const HOSTED: &str = "hosted";
-/// The fleet id this computer explicitly scrubbed: background sync never
-/// hands that fleet back until a person asks to join or share it again.
+/// The scrub marker written by `fleet scrub`, blocking unsolicited
+/// handovers until a person explicitly asks to join, share, or found again.
 const SCRUBBED: &str = "scrubbed";
+const SCRUBBED_ALL: &str = "all";
+const SCRUBBED_EXCEPT: &str = "except:";
+const MAX_SCRUBBED: u64 = 128;
 /// At worst, suspensions take about 23.5 MB of it (a save's first write
 /// keeping what the file held beside what is held, each folded target
 /// still within its bound), the removals kept to check again about 6 MB,
@@ -330,44 +333,40 @@ pub(super) fn save_hosted(state_dir: &Path, fleet: &str) -> Result<()> {
     Ok(())
 }
 
-/// The fleet id this computer last scrubbed, if any. Blocking.
-pub(super) fn load_scrubbed(state_dir: &Path) -> Result<Option<FleetId>> {
-    Ok(
-        read_bounded(&path(state_dir, SCRUBBED), 64)?.and_then(|bytes| {
-            std::str::from_utf8(&bytes)
-                .ok()
-                .map(str::trim)
-                .and_then(FleetId::from_hex)
-        }),
-    )
+/// The scrub marker on disk, if any. A file that exists with unexpected or
+/// oversized contents fails closed to [`super::Scrubbed::All`]. Blocking.
+pub(super) fn load_scrubbed(state_dir: &Path) -> Result<Option<super::Scrubbed>> {
+    let bytes = match read_bounded(&path(state_dir, SCRUBBED), MAX_SCRUBBED) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => return Ok(None),
+        Err(crate::desktop::Error::RecordFormat) => return Ok(Some(super::Scrubbed::All)),
+        Err(error) => return Err(error.into()),
+    };
+    let text = std::str::from_utf8(&bytes).ok().map(str::trim);
+    let scrubbed = match text {
+        Some(SCRUBBED_ALL) => super::Scrubbed::All,
+        Some(rest) => rest
+            .strip_prefix(SCRUBBED_EXCEPT)
+            .and_then(FleetId::from_hex)
+            .map_or(super::Scrubbed::All, super::Scrubbed::Except),
+        None => super::Scrubbed::All,
+    };
+    Ok(Some(scrubbed))
 }
 
-/// Records that this computer explicitly scrubbed `fleet`. Blocking.
-pub(super) fn save_scrubbed(state_dir: &Path, fleet: FleetId) -> Result<()> {
-    write_private(&path(state_dir, SCRUBBED), fleet.to_string().as_bytes())?;
+/// Records `scrubbed` on disk. Blocking.
+pub(super) fn save_scrubbed(state_dir: &Path, scrubbed: super::Scrubbed) -> Result<()> {
+    let text = match scrubbed {
+        super::Scrubbed::All => SCRUBBED_ALL.to_owned(),
+        super::Scrubbed::Except(fleet) => format!("{SCRUBBED_EXCEPT}{fleet}"),
+    };
+    write_private(&path(state_dir, SCRUBBED), text.as_bytes())?;
     Ok(())
 }
 
-/// Clears the scrubbed fleet marker once a person asks to join, share, or
-/// found again. Blocking.
+/// Clears the scrub marker once a fleet is founded or adopted. Blocking.
 pub(super) fn clear_scrubbed(state_dir: &Path) -> Result<()> {
     remove(&path(state_dir, SCRUBBED))
-}
-
-/// Best-effort read of the fleet id on disk before an offline or unloaded
-/// scrub deletes it, so a damaged file never blocks the scrub. Blocking.
-pub(super) fn peek_fleet(state_dir: &Path) -> Option<FleetId> {
-    if let Ok(Some(hosted)) = load_hosted(state_dir)
-        && let Some(fleet) = FleetId::from_hex(hosted.trim())
-    {
-        return Some(fleet);
-    }
-    let bytes = read_bounded(&path(state_dir, LOG), saved::MAX_SAVED as u64)
-        .ok()
-        .flatten()?;
-    saved::decode(&bytes, crate::web::now_ms())
-        .ok()
-        .map(|log| log.fleet())
 }
 
 /// Removes the log and how this computer joined it, once it left the

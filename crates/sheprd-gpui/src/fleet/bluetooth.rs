@@ -11,9 +11,9 @@ use crate::remote::Supervisor;
 use gpui::App;
 use sheprd_client::ConnectTarget;
 use sheprd_remote_control::control::fleet::{
-    HostKind, Kind, Method, View,
+    Bundle, HostKind, Kind, Method, View,
     bluetooth::{ApprovedFleet, Hint, Joining},
-    sync::{Answer, Apply, Ask},
+    sync::{self, Answer, Apply, Ask},
 };
 use std::{sync::atomic::AtomicBool, time::Duration};
 
@@ -149,6 +149,11 @@ async fn finish(
     match fleet.clone() {
         ApprovedFleet::Joining(joining) => {
             let ours = ours.ok_or(Error::NoDaemon)?;
+            let peer = sync::bytes(&joining.bundle)
+                .ok()
+                .and_then(|bytes| Bundle::from_bytes(&bytes).ok())
+                .and_then(|bundle| bundle.host?.id().ok())
+                .map(|host| host.to_string());
             flows::daemon(
                 client,
                 Ask::Admit {
@@ -158,7 +163,7 @@ async fn finish(
                 },
             )
             .await?;
-            flows::hand_over(client, executor, target, ours).await
+            flows::hand_over(client, executor, target, ours, peer.as_deref()).await
         }
         ApprovedFleet::Joined { fleet } => {
             take_over(client, executor, target, &fleet).await?;

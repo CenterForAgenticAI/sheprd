@@ -149,6 +149,28 @@ pub(crate) enum Holder {
     Member(MemberId),
 }
 
+/// What `fleet scrub` opted out of (`fleet/scrubbed`): unsolicited
+/// handovers are refused until a person explicitly asks to join, share,
+/// or found again.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Scrubbed {
+    /// Block every unsolicited handover, whether a log was held, damaged,
+    /// partially joining, or absent when scrubbed.
+    All,
+    /// Block every unsolicited handover except `FleetId`, which a person
+    /// explicitly signed a join bundle for.
+    Except(FleetId),
+}
+
+impl Scrubbed {
+    pub(crate) fn blocks(self, fleet: FleetId) -> bool {
+        match self {
+            Self::All => true,
+            Self::Except(allowed) => allowed != fleet,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Inner {
     pub(crate) log: Option<Log>,
@@ -179,10 +201,9 @@ pub(crate) struct Inner {
     /// one `fleet apply` comes over several. It grants nothing; it becomes
     /// the log once it admits this computer or shares it as a host.
     pub(crate) joining: BTreeMap<FleetId, joining::Joining>,
-    /// The fleet this computer explicitly scrubbed (`fleet/scrubbed`):
-    /// unsolicited `fleet apply` handovers for it are refused until a
-    /// person asks to join, share, or found again.
-    pub(crate) scrubbed: Option<FleetId>,
+    /// Unsolicited handover block written by `fleet scrub`
+    /// (`fleet/scrubbed`).
+    pub(crate) scrubbed: Option<Scrubbed>,
     /// Removals plain hosts' agents reported suspending for that the log
     /// has not heard of, with when first and how many times
     /// (`plain::Unknown`).
@@ -399,21 +420,17 @@ impl Fleet {
         Ok(())
     }
 
-    /// Clears the scrubbed-fleet marker once a person explicitly asks to
-    /// join or share `fleet` (or any fleet, when `None`), so an explicit
-    /// invite/join/share after a scrub is accepted. Blocking.
-    pub(crate) fn allow_rejoin(&self, fleet: Option<FleetId>) -> Result<()> {
+    /// Narrows an active scrub guard to allow joining `fleet` once a person
+    /// explicitly signs a bundle for it, keeping every other fleet blocked
+    /// until a fleet is adopted. Blocking.
+    pub(crate) fn allow_rejoin(&self, fleet: FleetId) -> Result<()> {
         let mut inner = self.inner();
-        let clear = match (inner.scrubbed, fleet) {
-            (Some(_), None) => true,
-            (Some(scrubbed), Some(wanted)) => scrubbed == wanted,
-            (None, _) => false,
-        };
-        if !clear {
+        if inner.scrubbed.is_none() || inner.scrubbed == Some(Scrubbed::Except(fleet)) {
             return Ok(());
         }
-        store::clear_scrubbed(&self.state_dir)?;
-        inner.scrubbed = None;
+        let next = Scrubbed::Except(fleet);
+        store::save_scrubbed(&self.state_dir, next)?;
+        inner.scrubbed = Some(next);
         Ok(())
     }
 
@@ -425,7 +442,7 @@ impl Fleet {
     // fleet tests do, so a Windows test build sees it unused too.
     #[cfg_attr(not(all(test, unix)), allow(dead_code))]
     pub(crate) fn receive(&self, ops: Vec<Op>, now_ms: u64) -> Result<usize> {
-        self.receive_from(ops, &[], now_ms)
+        self.receive_from(ops, &[], false, now_ms)
     }
 
     /// [`Fleet::receive`] into the fleet `fleet` only: what a removal
@@ -439,14 +456,22 @@ impl Fleet {
         if self.inner().log.as_ref().map(Log::fleet) != Some(fleet) {
             return Err(Error::NoFleet);
         }
-        self.receive_from(ops, &[], now_ms)
+        self.receive_from(ops, &[], false, now_ms)
     }
 
     /// [`Fleet::receive`], from a caller whose heads are `caller`: with no
     /// fleet yet, a history that shares this computer as a host becomes
     /// the log only once it holds all of them, the caller's whole log, so
     /// the `Access` denials signed with the share have arrived too.
-    fn receive_from(&self, ops: Vec<Op>, caller: &[OpId], now_ms: u64) -> Result<usize> {
+    /// `rejoin` is set only by an explicit host share, allowing a scrubbed
+    /// host to accept that shared-host handover.
+    fn receive_from(
+        &self,
+        ops: Vec<Op>,
+        caller: &[OpId],
+        rejoin: bool,
+        now_ms: u64,
+    ) -> Result<usize> {
         let mut inner = self.inner();
         self.release_if_left(&mut inner)?;
         let before = inner.log.as_ref().map(|log| log.heads().to_vec());
@@ -465,7 +490,9 @@ impl Fleet {
                 .filter(|(_, result)| result.is_err())
                 .count(),
             None => {
-                let Some((log, refused)) = self.join_parts(&mut inner, ops, caller, now_ms)? else {
+                let Some((log, refused)) =
+                    self.join_parts(&mut inner, ops, caller, rejoin, now_ms)?
+                else {
                     // Kept, granting nothing, for the rest to arrive.
                     let saved = self.save(&inner);
                     drop(inner);
@@ -540,7 +567,7 @@ impl Fleet {
                 .collect(),
             _ => ops,
         };
-        let refused = match self.receive_from(ops, &heads, now_ms) {
+        let refused = match self.receive_from(ops, &heads, apply.rejoin, now_ms) {
             Ok(refused) => refused,
             Err(Error::NotAdmitted)
                 if named.is_some_and(|named| self.inner().joining.contains_key(&named)) =>
@@ -653,10 +680,23 @@ impl Fleet {
         *self.scrubbed.lock().unwrap_or_else(PoisonError::into_inner) =
             session.map(|session| (std::time::Instant::now(), session));
         let mut inner = self.inner();
-        let scrubbed = inner.log.as_ref().map(Log::fleet).or(inner.scrubbed);
+        let previous = inner.scrubbed;
+        // Persist the scrub guard before deleting the log so a write failure
+        // (e.g. full disk) never leaves neither log nor guard after restart.
+        store::save_scrubbed(&self.state_dir, Scrubbed::All)?;
         // Kept when its file stays: the error is reported, and the role
         // with it.
-        store::remove_log(&self.state_dir)?;
+        if let Err(error) = store::remove_log(&self.state_dir) {
+            match previous {
+                Some(prev) => {
+                    let _ = store::save_scrubbed(&self.state_dir, prev);
+                }
+                None => {
+                    let _ = store::clear_scrubbed(&self.state_dir);
+                }
+            }
+            return Err(error);
+        }
         inner.log = None;
         // A fleet joined later is joined afresh, as a member or a host.
         self.hosted.store(false, Ordering::SeqCst);
@@ -667,12 +707,7 @@ impl Fleet {
             // has none on disk to keep.
             *self.on_disk.lock().unwrap_or_else(PoisonError::into_inner) = Suspensions::default();
         }
-        if let Some(fleet) = scrubbed {
-            inner.scrubbed = Some(fleet);
-            if let Err(error) = store::save_scrubbed(&self.state_dir, fleet) {
-                tracing::warn!(%error, "could not record the scrubbed fleet id");
-            }
-        }
+        inner.scrubbed = Some(Scrubbed::All);
         drop(inner);
         self.bump();
         removed

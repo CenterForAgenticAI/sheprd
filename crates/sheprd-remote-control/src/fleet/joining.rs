@@ -46,6 +46,7 @@ impl Fleet {
         inner: &mut Inner,
         ops: Vec<Op>,
         caller: &[OpId],
+        rejoin: bool,
         now_ms: u64,
     ) -> Result<Option<(Log, usize)>> {
         let mut by_fleet: BTreeMap<FleetId, Vec<Op>> = BTreeMap::new();
@@ -54,7 +55,10 @@ impl Fleet {
         }
         let mut refused = BTreeMap::new();
         for (fleet, ops) in by_fleet {
-            if inner.scrubbed == Some(fleet) {
+            let blocked = inner
+                .scrubbed
+                .is_some_and(|scrubbed| scrubbed.blocks(fleet));
+            if blocked && !rejoin {
                 refused.insert(fleet, ops.len());
                 continue;
             }
@@ -92,12 +96,23 @@ impl Fleet {
         let admitted = inner
             .joining
             .iter()
+            .filter(|(fleet, _)| {
+                !inner
+                    .scrubbed
+                    .is_some_and(|scrubbed| scrubbed.blocks(**fleet))
+            })
             .find(|(_, joining)| sync::admits(&joining.log, &self.me))
             .map(|(fleet, _)| (*fleet, false));
         let shared = || {
             inner
                 .joining
                 .iter()
+                .filter(|(fleet, _)| {
+                    rejoin
+                        || !inner
+                            .scrubbed
+                            .is_some_and(|scrubbed| scrubbed.blocks(**fleet))
+                })
                 .find(|(_, joining)| {
                     !caller.is_empty()
                         && caller.iter().all(|head| joining.log.get(head).is_some())

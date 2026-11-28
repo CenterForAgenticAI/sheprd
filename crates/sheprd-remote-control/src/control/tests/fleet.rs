@@ -31,6 +31,7 @@ fn fleet_requests_keep_their_wire_names() {
             ops: Vec::new(),
             nonce: None,
             peer: None,
+            rejoin: false,
         })))
     );
     assert_eq!(

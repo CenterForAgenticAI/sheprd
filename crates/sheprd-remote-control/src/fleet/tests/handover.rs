@@ -328,6 +328,87 @@ async fn a_members_own_host_record_never_admits_a_different_fleet_key_as_shared(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn scrubbing_an_interrupted_join_blocks_automatic_handover() {
+    let (http, _, _) = relay().await;
+    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    let fleet = a.view().fleet;
+    let Answer::Bundle { bundle, signature } = b.ask(Ask::Bundle {
+        fleet: fleet.clone(),
+    }) else {
+        panic!("no bundle");
+    };
+    assert_eq!(
+        a.ask(Ask::Admit {
+            bundle,
+            signature,
+            method: crate::control::fleet::Method::Ssh,
+        }),
+        Answer::Done
+    );
+    // b has no log yet (only partial history in joining); scrubbing it still
+    // records an opt-out so background sync cannot adopt the fleet.
+    let ops = in_order(&a);
+    let partial = Apply {
+        fleet: Some(fleet.clone()),
+        heads: a.view().heads,
+        ops: sync::encode_ops(&ops[..1]),
+        ..Apply::default()
+    };
+    let _ = b.fleet.apply(&partial, now_ms()).unwrap();
+    assert!(b.fleet.inner().log.is_none());
+    assert_eq!(b.ask(Ask::Scrub { session: None }), Answer::Done);
+    let handover = Apply {
+        fleet: Some(fleet),
+        heads: a.view().heads,
+        ops: sync::encode_ops(&ops),
+        ..Apply::default()
+    };
+    assert!(b.fleet.apply(&handover, now_ms()).is_err());
+    let reloaded = Fleet::load(b.dir.path(), now_ms()).unwrap();
+    assert!(reloaded.apply(&handover, now_ms()).is_err());
+    assert!(ask::view(&reloaded).is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn background_intro_read_does_not_clear_a_shared_hosts_scrub_guard() {
+    let (http, _, _) = relay().await;
+    let (a, host) = (Node::new(http, 1).await, Node::new(http, 5).await);
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    let fleet = a.view().fleet;
+    let Answer::Intro { intro } = host.ask(Ask::Intro) else {
+        panic!("no intro");
+    };
+    assert_eq!(
+        a.ask(Ask::AddHost {
+            intro,
+            deny: Vec::new(),
+        }),
+        Answer::Done
+    );
+    let handover = Apply {
+        fleet: Some(fleet.clone()),
+        heads: a.view().heads,
+        ops: sync::encode_ops(&in_order(&a)),
+        ..Apply::default()
+    };
+    assert!(host.fleet.apply(&handover, now_ms()).is_ok());
+    assert_eq!(host.ask(Ask::Scrub { session: None }), Answer::Done);
+    // Background `Ask::Intro` is read-only and never clears the scrub guard.
+    assert!(matches!(host.ask(Ask::Intro), Answer::Intro { .. }));
+    assert!(host.fleet.apply(&handover, now_ms()).is_err());
+    assert!(ask::view(&host.fleet).is_none());
+    // Explicit Share (`rejoin: true`) re-adopts the shared host log.
+    let explicit = Apply {
+        rejoin: true,
+        ..handover
+    };
+    let applied = host.fleet.apply(&explicit, now_ms()).unwrap();
+    assert_eq!(applied.fleet, fleet);
+    assert!(host.fleet.host().is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_shared_host_waits_for_the_denials_signed_with_its_share() {
     let (http, _, _) = relay().await;
     let (a, b, host) = (
