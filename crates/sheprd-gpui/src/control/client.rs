@@ -10,6 +10,7 @@ mod help;
 mod hosts;
 mod labels;
 mod local;
+mod modal;
 mod mods;
 mod open;
 mod phone;
@@ -593,6 +594,7 @@ pub(crate) fn dispatch(command: ControlCommand, context: &Context) -> crate::Res
         ControlCommand::Fleet(command) => fleet::fleet(command, context),
         ControlCommand::Phone(command) => phone::phone(command, context),
         ControlCommand::Mod(command) => mods::run(command, context),
+        ControlCommand::Modal(command) => modal::run(command, context),
         ControlCommand::Search {
             files,
             query,

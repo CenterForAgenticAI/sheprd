@@ -289,8 +289,19 @@ fn run(
     if let Dial::Ssh(host, script) = dial {
         let shared =
             sheprd_client::shared_script_command(&host, &script, sheprd_client::SshLane::Stream);
-        // The channel stays open until the child below is reaped.
+        // The channel stays open until the child below is reaped. Through a
+        // relay, every login of a chat's own is a dial, which a window full
+        // of chats retrying would run past the relay's rate with: such a
+        // chat waits for room on the shared connection instead.
         return match shared {
+            Ok((_, None))
+                if waits_for_shared(
+                    &host,
+                    sheprd_client::rides_own_master(&host, sheprd_client::SshLane::Stream),
+                ) =>
+            {
+                Error::NoSharedLogin
+            }
             Ok((command, _channel)) => run(Dial::Process(command), since, queued, events, socket),
             Err(error) => Error::Remote(error),
         };
@@ -366,6 +377,14 @@ fn serve(
     end
 }
 
+/// Whether a chat on `host` that got no channel on the host's shared
+/// connection waits rather than logging in on its own: a relay host's
+/// every login is a dial its rate counts. A master of the user's own, which
+/// the direct command rides without another login, carries it instead.
+fn waits_for_shared(host: &str, rides_own_master: bool) -> bool {
+    sheprd_client::relay_host::is_relay_target(host) && !rides_own_master
+}
+
 /// The writer thread: the greeting, then each queued command in order,
 /// until the link is dropped or a write fails.
 fn write(
@@ -383,4 +402,16 @@ fn write(
         }
     }
     closer.close();
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_a_relay_hosts_chats_wait_for_its_shared_connection() {
+        let relay = "penso@r-c83c5296e5b87858.sheprd.invalid";
+        assert!(super::waits_for_shared(relay, false));
+        // A master of the user's own carries it without another dial.
+        assert!(!super::waits_for_shared(relay, true));
+        assert!(!super::waits_for_shared("penso@studio.local", false));
+    }
 }

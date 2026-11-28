@@ -593,6 +593,14 @@ pub fn powershell_command(target: &str, script: &str) -> Result<Command> {
     Ok(command)
 }
 
+/// Whether `target`'s `lane` commands ride a master of the user's own
+/// (their `ControlPath`), so a command [`shared_script_command`] handed out
+/// with no channel still opens no new login.
+#[must_use]
+pub fn rides_own_master(target: &str, lane: mux::Lane) -> bool {
+    mux::rides_user_master(target, lane)
+}
+
 fn shared_command(
     target: &str,
     remote_command: &str,

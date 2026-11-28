@@ -718,6 +718,26 @@ sheprd wait tab-closed 12 --timeout 600
 sheprd wait window            # also waits for the app to start
 ```
 
+### Persistent modals & agent interactions
+
+`modal` triggers persistent in-window modals, always-on-top global HUD alerts (such as YubiKey touch prompts), secret-safe vault injection (`0600` `.env` file or private vault without entering chat history or LLM context), the floating Dynamic Progress Pill, shared human + agent runbooks, drop-zones, focused mini-diffs, spotlights, and semantic audio + Edge Light cues. Every subcommand accepts `--json` and `--window`.
+
+```sh
+sheprd modal [list]
+sheprd modal show|urgent --title TITLE [--scope window|all] [--choices 'A|B'] [--quick-reply] [--cue CUE] [BODY...]
+sheprd modal countdown --title TITLE [--seconds N] [--scope window|all] [BODY...]
+sheprd modal otp [--title TITLE] [BODY...]
+sheprd modal oauth --url URL [--code CODE] [--title TITLE] [BODY...]
+sheprd modal secret --key NAME --dest env-file:PATH|keychain:NAME [--title TITLE] [--reason TEXT] [--save-keychain]
+sheprd modal progress --title TITLE [--percent 0..100] [--step TEXT] [--done]
+sheprd modal runbook --title TITLE 'agent: Step 1 | you: Tap YubiKey'
+sheprd modal drop [--title TITLE] [--accept '.png,.ips'] [--scope all|window]
+sheprd modal diff [--title TITLE] [--file PATH] DIFF...
+sheprd modal spotlight --title TITLE --target TARGET [--step '1/2'] [BODY...]
+sheprd modal cue yubikey|decision|secret|countdown|done
+sheprd modal clear [--id ID | --all]
+```
+
 ## Updating Sheprd on other machines
 
 When a machine you reach over SSH (or a cloud device) runs its own Sheprd app,

@@ -531,6 +531,7 @@ what Sheprd shows or keeps.
 | List active read-only shared sessions, or open the Share this session dialog for the user to preview and confirm | `sheprd remote shares --json`, `sheprd remote share [--pane ID]` |
 | Open speaking voice settings to connect or preview a provider | `sheprd ui settings voice`, `sheprd phone open settings voice --device ID` |
 | Point out a Settings control with a persistent explanation on desktop or phone | `sheprd ui settings --json`, `sheprd ui guide TEXT --highlight ROW_ID`, `sheprd phone targets --json`, `sheprd phone guide TEXT --highlight TARGET --device ID` |
+| Trigger a persistent window modal, global always-on-top YubiKey/urgent HUD, secret-safe vault prompt, floating progress pill, runbook, drop-zone, mini-diff, spotlight, or semantic cue | `sheprd modal show\|urgent --title "..."`, `sheprd modal secret --key K --dest env-file:.env.local`, `sheprd modal progress --title "..." --percent 68`, `sheprd modal clear` |
 | Keep the machine awake during a long job | `sheprd caffeine on --for 2h` |
 | Check whether the app runs, and which windows and hosts it has | `sheprd status` |
 

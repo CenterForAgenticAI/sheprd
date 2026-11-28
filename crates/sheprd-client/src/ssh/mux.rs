@@ -101,6 +101,19 @@ pub(crate) fn command(
     (super::command(target, remote_command), None)
 }
 
+/// Whether `target`'s `lane` commands ride a master of the user's own
+/// rather than one of this process's: connecting directly then opens no
+/// new login.
+pub(crate) fn rides_user_master(target: &str, lane: Lane) -> bool {
+    #[cfg(unix)]
+    return shared::registry().rides_user_master(target, lane);
+    #[cfg(not(unix))]
+    {
+        let _ = (target, lane);
+        false
+    }
+}
+
 /// A bridge to `session` on `target` is connecting. When it connected before
 /// in this process, this is a reconnect, and the network path may have
 /// changed (the user's config can pick a LAN or a VPN address), so the host's

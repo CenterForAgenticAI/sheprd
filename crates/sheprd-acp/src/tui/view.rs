@@ -159,6 +159,9 @@ pub(crate) struct View {
     pub completion: usize,
     /// A short message about the last thing that did not work.
     pub flash: Option<String>,
+    /// The guest prompt the last draw showed in full: only that one may be
+    /// sent on from here, so nothing reaches the agent unread.
+    pub guest_shown: std::cell::Cell<Option<sheprd_chat_protocol::PermissionId>>,
     history: History,
     quit_armed: bool,
     /// Lines scrolled up from the bottom; 0 follows new output.
@@ -469,6 +472,16 @@ impl View {
     fn answer(&mut self, index: usize) -> Option<Out> {
         let permission = self.transcript.permissions.first()?;
         let option = permission.options.get(index)?;
+        if permission.guest.is_some()
+            && option.id == sheprd_chat_protocol::GUEST_ALLOW
+            && self.guest_shown.get() != Some(permission.id)
+        {
+            self.flash = Some(
+                "This guest's prompt is too long to show here: read and send it from Sheprd"
+                    .to_owned(),
+            );
+            return None;
+        }
         Some(Out::Command(Command::Answer {
             option: option.id.clone(),
             permission: permission.id,
