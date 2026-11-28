@@ -2,6 +2,7 @@
 //!
 //! ```toml
 //! [chat]
+//! auto_accept = false # opt in to allow permission requests in attached chats
 //! auto_convert = false
 //! glide = true
 //! launcher = "plus"
@@ -61,6 +62,7 @@ const RESERVED: [&str; 1] = [crate::chat::PROGRAM_ENV];
 pub struct ChatConfig {
     /// Show persistent in-window modals, runbooks, diffs, and spotlights triggered by agents.
     pub agent_modals: bool,
+    pub auto_accept: bool,
     /// Newly started terminal agents move into chats once settled.
     pub auto_convert: bool,
     /// Code blocks number their lines unless a block's own button says otherwise.
@@ -95,6 +97,7 @@ impl Default for ChatConfig {
     fn default() -> Self {
         Self {
             agent_modals: true,
+            auto_accept: false,
             auto_convert: false,
             code_line_numbers: false,
             code_stripes: false,
