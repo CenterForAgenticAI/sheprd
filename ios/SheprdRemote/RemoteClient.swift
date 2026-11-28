@@ -208,6 +208,21 @@ final class RemoteClient: Sendable {
         return answer.id
     }
 
+    /// Uploads a picture of the app's window an agent on the computer asked
+    /// for (`sheprd phone snapshot`); answers the id its answer names.
+    func snapshot(_ image: Data, bearer: String) async throws -> String {
+        struct Answer: Decodable { let id: String }
+        guard let url = URL(string: origin + "/api/agent/snapshot") else { throw RemoteError.unreachable }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.upload(for: Self.tagged(request), from: image)
+        let answer: Answer = try decode(data, response)
+        return answer.id
+    }
+
     /// The agents and folders a new workspace or chat may use.
     func newOptions(bearer: String) async throws -> NewOptions {
         try await send("GET", "/api/v2/new", bearer: bearer)

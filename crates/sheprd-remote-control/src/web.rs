@@ -239,6 +239,10 @@ pub(crate) fn router(state: Shared) -> Router {
             "/api/chat/{pane}/upload",
             post(api::upload).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD + 1024)),
         )
+        .route(
+            "/api/agent/snapshot",
+            post(api::snapshot).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD + 1024)),
+        )
         .route("/api/workspaces", post(api::create_workspace))
         .route("/api/workspaces/{workspace}/chats", post(api::start_chat))
         .route(

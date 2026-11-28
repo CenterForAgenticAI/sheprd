@@ -28,7 +28,8 @@ strings -a "$app/SheprdRemote" > "$text"
 
 found=0
 for marker in "MoonLive" "applies as you type" "Showing the last good version." \
-    "Point at anything to see what drew it" "Copy this element for an agent" "MOONSWIFT_EXAMPLE"; do
+    "Point at anything to see what drew it" "Copy this element for an agent" "MOONSWIFT_EXAMPLE" \
+    "LuauLive" "/api/agent/snapshot" "changed by an agent on"; do
     if grep -qF "$marker" "$text"; then
         echo "✘ the Release app contains: $marker" >&2
         found=$((found + 1))
@@ -43,4 +44,4 @@ others=$(find "$app/Luau" -type f ! -name '*.luau')
 
 rm -f "$text"
 [ "$found" -eq 0 ] || exit 1
-echo "✔ the Release app links MoonKit and MoonUI, no MoonLive, and bundles $(find "$app/Luau" -name '*.luau' | wc -l | tr -d ' ') Luau files"
+echo "✔ the Release app links MoonKit and MoonUI, no MoonLive or agents' live Luau, and bundles $(find "$app/Luau" -name '*.luau' | wc -l | tr -d ' ') Luau files"
