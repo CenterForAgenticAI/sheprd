@@ -110,6 +110,65 @@ fn toggle_mod_panel_hides_and_shows_it(cx: &mut gpui::TestAppContext) {
     assert!(view.read_with(cx, |view, _| !view.mods.panel_hidden()));
 }
 
+/// The built-in Changed section can keep the right panel open without any
+/// third-party mods installed.
+#[gpui::test]
+fn changed_files_panel_stays_beside_terminals_without_mods(cx: &mut gpui::TestAppContext) {
+    let (_view, cx) = cx.add_window_view(|window, cx| {
+        let mut view = fixture_window(window, cx);
+        view.config.show_changes_panel = true;
+        view.update_mod_panel();
+        view
+    });
+    cx.update(|window, cx| full_draw(window, cx).clear(cx));
+    let panel = cx.debug_bounds("mod-panel").unwrap();
+    let changed = cx.debug_bounds("changes-panel").unwrap();
+    assert!(
+        panel.left() <= changed.left() && panel.right() >= changed.right(),
+        "{changed:?} outside {panel:?}"
+    );
+    assert!(cx.debug_bounds("mod-panel-first").is_none());
+}
+
+/// When Changed is the only panel section, F6 skips the read-only panel and
+/// still reaches the status bar instead of bouncing back to the terminal.
+#[gpui::test]
+fn f6_reaches_status_bar_when_changed_panel_is_the_only_section(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = cx.add_window_view(|window, cx| {
+        let mut view = fixture_window(window, cx);
+        view.config.show_changes_panel = true;
+        view.update_mod_panel();
+        view
+    });
+    cx.update(|window, _| window.activate_window());
+    let mut visited = Vec::new();
+    for _ in 0..8 {
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.command(crate::controls::Command::FocusNextRegion, window, cx);
+            });
+        });
+        for _ in 0..3 {
+            cx.update(|window, cx| full_draw(window, cx).clear(cx));
+            cx.run_until_parked();
+        }
+        let region = view.read_with(cx, |view, _| view.chrome_region);
+        visited.push(region);
+        if region == Some(crate::window::chrome_focus::Region::StatusBar) {
+            break;
+        }
+    }
+    assert!(
+        !visited.contains(&Some(crate::window::chrome_focus::Region::ModPanel)),
+        "expected read-only Changed panel to be skipped: {visited:?}"
+    );
+    assert_eq!(
+        visited.last().copied().flatten(),
+        Some(crate::window::chrome_focus::Region::StatusBar),
+        "expected F6 to reach the status bar: {visited:?}"
+    );
+}
+
 /// Many tall sidebar mods share one area of at most 40% of the sidebar, so
 /// the workspace and agent lists keep the rest.
 #[gpui::test]
