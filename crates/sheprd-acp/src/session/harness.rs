@@ -19,9 +19,9 @@ impl<R: FnMut(Update)> Session<R> {
     /// session to finish replaying its history.
     fn loading_initial(&self) -> bool {
         !self.ready
+            && self.transcript.status == Status::Starting
             && self.config.load.is_some()
             && !self.thread.replaying()
-            && !matches!(self.transcript.status, Status::Failed { .. })
     }
 
     pub(super) fn set_agent(&mut self, agent: Agent) -> Result<(), Rejection> {

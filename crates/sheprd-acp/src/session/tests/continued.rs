@@ -279,3 +279,29 @@ fn switching_immediately_after_acp_replay_hands_over_history_and_can_resume_back
         }
     );
 }
+
+#[test]
+fn a_resumed_chat_can_switch_away_after_its_agent_exits() {
+    use harnesses::rejection;
+
+    let mut harness = resumed(Some(history()));
+    let client = harness.subscribe(1, false, None);
+    harness.input(Input::AgentExited {
+        code: Some(1),
+        harness: HarnessId(0),
+        stderr: vec!["crashed".to_owned()],
+    });
+    assert!(matches!(harness.transcript().status, Status::Exited { .. }));
+
+    drain(&client);
+    let (flow, id) = set_agent(&mut harness, Agent::Codex);
+    assert_eq!(
+        flow,
+        Flow::Launch {
+            agent: Agent::Codex,
+            harness: HarnessId(1),
+            load: None,
+        }
+    );
+    assert_eq!(rejection(&drain(&client), id), None);
+}
