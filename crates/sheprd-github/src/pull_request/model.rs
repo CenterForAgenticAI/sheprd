@@ -589,6 +589,12 @@ pub fn key_input(key: &str, branch: Option<&str>) -> crate::Result<Input> {
     repository_input_on(Some(key), branch, &Origin::Local)
 }
 
+/// A checkout's lookup key from its repository's common Git directory on
+/// `origin`, validated with the same rules as `workspace_input`.
+pub fn key_input_on(key: &str, branch: Option<&str>, origin: &Origin) -> crate::Result<Input> {
+    repository_input_on(Some(key), branch, origin)
+}
+
 fn repository_input_on(
     key: Option<&str>,
     branch: Option<&str>,
